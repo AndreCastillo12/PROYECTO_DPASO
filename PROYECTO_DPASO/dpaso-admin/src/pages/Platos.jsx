@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import Sortable from "sortablejs";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import ConfirmModal from "../components/ConfirmModal";
@@ -18,6 +19,7 @@ export default function Platos() {
   const [platoToDelete, setPlatoToDelete] = useState(null);
 
   const fileInputRef = useRef(null);
+  const listRefs = useRef({});
 
   const [form, setForm] = useState({
     id: null,
@@ -70,6 +72,62 @@ export default function Platos() {
   useEffect(() => {
     cargarDatos();
   }, []);
+
+  useEffect(() => {
+    if (!categorias.length) return undefined;
+
+    const sortables = categorias
+      .map(cat => {
+        const listElement = listRefs.current[cat.id];
+        if (!listElement) return null;
+
+        return Sortable.create(listElement, {
+          animation: 150,
+          onMove: () => !busy,
+          onEnd: async () => {
+            if (busy) return;
+
+            try {
+              setBusy(true);
+
+              const orderedIds = Array.from(
+                listElement.querySelectorAll("[data-plato-id]")
+              ).map(node => node.dataset.platoId);
+
+              const updatedPlatos = platos.map(plato => {
+                if (plato.categoria_id !== cat.id) return plato;
+                const index = orderedIds.indexOf(plato.id);
+                return index === -1 ? plato : { ...plato, orden: index + 1 };
+              });
+
+              setPlatos(updatedPlatos);
+
+              for (let i = 0; i < orderedIds.length; i++) {
+                const { error } = await supabase
+                  .from("platos")
+                  .update({ orden: i + 1 })
+                  .eq("id", orderedIds[i]);
+
+                if (error) throw error;
+              }
+
+              showToast("Orden de platos actualizado ✅");
+            } catch (err) {
+              console.error(err);
+              showToast(err.message || "Error actualizando orden", "error");
+              cargarDatos();
+            } finally {
+              setBusy(false);
+            }
+          },
+        });
+      })
+      .filter(Boolean);
+
+    return () => {
+      sortables.forEach(sortable => sortable?.destroy());
+    };
+  }, [categorias, platos, busy]);
 
   function abrirEditar(p) {
     setForm({
@@ -306,9 +364,15 @@ export default function Platos() {
         <div key={cat.id} style={{ marginBottom: "30px" }}>
           <h3 style={{ marginBottom: "10px" }}>{cat.nombre}</h3>
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
+          <div
+            ref={el => {
+              if (el) listRefs.current[cat.id] = el;
+            }}
+            data-categoria-id={cat.id}
+            style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}
+          >
             {platos.filter(p => p.categoria_id === cat.id).map(p => (
-              <div key={p.id} className="card" style={cardStyle}>
+              <div key={p.id} data-plato-id={p.id} className="card" style={cardStyle}>
                 {p.imagen && (
                   <img
                     src={supabase.storage.from("platos").getPublicUrl(p.imagen).data.publicUrl}
@@ -412,7 +476,8 @@ const cardStyle = {
   width: "220px",
   backgroundColor: "#fff",
   display: "flex",
-  flexDirection: "column"
+  flexDirection: "column",
+  cursor: "grab"
 };
 
 const cardImgStyle = {

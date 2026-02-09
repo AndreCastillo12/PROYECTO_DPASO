@@ -5,16 +5,20 @@ const INITIAL_FORM = {
   nombre: "",
   apellidos: "",
   telefono: "",
-  avatarUrl: "",
 };
 
 export default function Perfil() {
   const [user, setUser] = useState(null);
   const [form, setForm] = useState(INITIAL_FORM);
+  const [avatarPath, setAvatarPath] = useState("");
+  const [avatarDisplayUrl, setAvatarDisplayUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [resendLoading, setResendLoading] = useState(false);
+  const [localAvatarFile, setLocalAvatarFile] = useState(null);
+  const [localAvatarPreview, setLocalAvatarPreview] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -35,12 +39,21 @@ export default function Perfil() {
 
       const currentUser = data.user;
       setUser(currentUser);
+
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("nombre, apellidos, telefono, avatar_path")
+        .eq("id", currentUser.id)
+        .maybeSingle();
+
+      if (!isMounted) return;
+
       setForm({
-        nombre: currentUser.user_metadata?.nombre || "",
-        apellidos: currentUser.user_metadata?.apellidos || "",
-        telefono: currentUser.user_metadata?.telefono || "",
-        avatarUrl: currentUser.user_metadata?.avatar_url || "",
+        nombre: profileData?.nombre || "",
+        apellidos: profileData?.apellidos || "",
+        telefono: profileData?.telefono || "",
       });
+      setAvatarPath(profileData?.avatar_path || "");
       setLoading(false);
     }
 
@@ -51,14 +64,63 @@ export default function Perfil() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!localAvatarFile) {
+      setLocalAvatarPreview("");
+      return undefined;
+    }
+
+    const previewUrl = URL.createObjectURL(localAvatarFile);
+    setLocalAvatarPreview(previewUrl);
+
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [localAvatarFile]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function cargarAvatar() {
+      if (localAvatarPreview) return;
+
+      if (avatarPath) {
+        const { data, error: signedError } = await supabase.storage
+          .from("avatars")
+          .createSignedUrl(avatarPath, 60 * 60);
+
+        if (!active) return;
+
+        if (signedError || !data?.signedUrl) {
+          const { data: publicData } = supabase.storage
+            .from("avatars")
+            .getPublicUrl(avatarPath);
+          setAvatarDisplayUrl(publicData?.publicUrl || "");
+          return;
+        }
+
+        setAvatarDisplayUrl(data.signedUrl);
+        return;
+      }
+
+      setAvatarDisplayUrl("");
+    }
+
+    cargarAvatar();
+
+    return () => {
+      active = false;
+    };
+  }, [avatarPath, localAvatarPreview]);
+
   const email = user?.email || "";
+  const emailConfirmado = Boolean(user?.email_confirmed_at);
   const avatarPreview = useMemo(() => {
-    if (form.avatarUrl?.trim()) return form.avatarUrl.trim();
+    if (localAvatarPreview) return localAvatarPreview;
+    if (avatarDisplayUrl) return avatarDisplayUrl;
     if (email) {
       return `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(email)}`;
     }
     return "";
-  }, [email, form.avatarUrl]);
+  }, [email, avatarDisplayUrl, localAvatarPreview]);
 
   function actualizarCampo(campo) {
     return (event) => {
@@ -72,6 +134,47 @@ export default function Perfil() {
     return "";
   }
 
+  async function reenviarVerificacion() {
+    if (!email) return;
+    setResendLoading(true);
+    setError("");
+    setSuccess("");
+
+    const { error: resendError } = await supabase.auth.resend({
+      type: "signup",
+      email,
+    });
+
+    if (resendError) {
+      setError("No se pudo reenviar el correo de verificación.");
+      setResendLoading(false);
+      return;
+    }
+
+    setSuccess("Correo de verificación enviado. Revisa tu bandeja.");
+    setResendLoading(false);
+  }
+
+  async function subirAvatarLocal() {
+    if (!localAvatarFile || !user) return null;
+
+    const extension = localAvatarFile.name.split(".").pop();
+    const fileName = `${user.id}/${Date.now()}.${extension}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(fileName, localAvatarFile, { upsert: true });
+
+    if (uploadError) {
+      throw new Error(
+        uploadError.message ||
+          "No se pudo subir el avatar. Verifica el bucket \"avatars\" y sus permisos."
+      );
+    }
+
+    return fileName;
+  }
+
   async function guardarPerfil(event) {
     event.preventDefault();
     setError("");
@@ -83,31 +186,43 @@ export default function Perfil() {
       return;
     }
 
-    setSaving(true);
-
-    const { error: updateError } = await supabase.auth.updateUser({
-      data: {
-        nombre: form.nombre.trim(),
-        apellidos: form.apellidos.trim(),
-        telefono: form.telefono.trim(),
-        avatar_url: form.avatarUrl.trim(),
-      },
-    });
-
-    if (updateError) {
-      setError("No se pudo guardar el perfil. Intenta nuevamente.");
-      setSaving(false);
+    if (!user) {
+      setError("No se pudo identificar al usuario actual.");
       return;
     }
 
-    const { data } = await supabase.auth.getUser();
-    if (data?.user) {
-      setUser(data.user);
-      localStorage.setItem("userSession", JSON.stringify({ user: data.user }));
-    }
+    setSaving(true);
 
-    setSuccess("Perfil actualizado correctamente.");
-    setSaving(false);
+    try {
+      let nextAvatarPath = avatarPath || null;
+
+      if (localAvatarFile) {
+        nextAvatarPath = await subirAvatarLocal();
+      }
+
+      const payload = {
+        id: user.id,
+        nombre: form.nombre.trim(),
+        apellidos: form.apellidos.trim(),
+        telefono: form.telefono.trim(),
+        avatar_path: nextAvatarPath,
+      };
+
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .upsert(payload, { onConflict: "id" });
+
+      if (updateError) throw updateError;
+
+      setAvatarPath(nextAvatarPath || "");
+      setLocalAvatarFile(null);
+      setSuccess("Perfil actualizado correctamente.");
+    } catch (saveError) {
+      console.error(saveError);
+      setError(saveError?.message || "No se pudo guardar el perfil. Intenta nuevamente.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (loading) {
@@ -138,6 +253,21 @@ export default function Perfil() {
           <div style={fieldGroupStyle}>
             <label style={labelStyle}>Correo</label>
             <input type="email" value={email} readOnly style={{ ...inputStyle, backgroundColor: "#f3f4f6" }} />
+            <div style={statusRowStyle}>
+              <span style={emailConfirmado ? verifiedStyle : pendingStyle}>
+                {emailConfirmado ? "Correo verificado" : "Correo sin verificar"}
+              </span>
+              {!emailConfirmado && (
+                <button
+                  type="button"
+                  style={resendButtonStyle}
+                  onClick={reenviarVerificacion}
+                  disabled={resendLoading}
+                >
+                  {resendLoading ? "Enviando..." : "Reenviar verificación"}
+                </button>
+              )}
+            </div>
             <span style={helperStyle}>El correo se toma de la sesión actual y no se puede editar.</span>
           </div>
 
@@ -178,15 +308,18 @@ export default function Perfil() {
           </div>
 
           <div style={fieldGroupStyle}>
-            <label style={labelStyle}>Foto de perfil (URL)</label>
+            <label style={labelStyle}>Foto de perfil (archivo local)</label>
             <input
-              type="url"
-              placeholder="https://..."
-              value={form.avatarUrl}
-              onChange={actualizarCampo("avatarUrl")}
-              style={inputStyle}
+              type="file"
+              accept="image/*"
+              onChange={(event) => {
+                const file = event.target.files?.[0] || null;
+                setLocalAvatarFile(file);
+              }}
             />
-            <span style={helperStyle}>Puedes usar un enlace público de imagen.</span>
+            <span style={helperStyle}>
+              Se subirá al bucket &quot;avatars&quot; en Supabase. Asegúrate de que exista y tenga permisos de lectura/escritura.
+            </span>
           </div>
 
           <button type="submit" style={saving ? { ...btnSave, opacity: 0.7 } : btnSave} disabled={saving}>
@@ -274,6 +407,12 @@ const fieldGroupStyle = {
   gap: "8px",
 };
 
+const statusRowStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: "12px",
+};
+
 const labelStyle = {
   fontWeight: "600",
   color: "#374151",
@@ -292,6 +431,33 @@ const inputStyle = {
   border: "1px solid #e5e7eb",
   fontSize: "14px",
   outline: "none",
+};
+
+const verifiedStyle = {
+  backgroundColor: "#dcfce7",
+  color: "#166534",
+  padding: "4px 8px",
+  borderRadius: "999px",
+  fontSize: "12px",
+  fontWeight: "600",
+};
+
+const pendingStyle = {
+  backgroundColor: "#fee2e2",
+  color: "#991b1b",
+  padding: "4px 8px",
+  borderRadius: "999px",
+  fontSize: "12px",
+  fontWeight: "600",
+};
+
+const resendButtonStyle = {
+  backgroundColor: "transparent",
+  border: "1px solid #d1d5db",
+  borderRadius: "999px",
+  padding: "4px 10px",
+  fontSize: "12px",
+  cursor: "pointer",
 };
 
 const btnSave = {

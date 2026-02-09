@@ -7,10 +7,12 @@ import Platos from "./pages/Platos";
 import Categorias from "./pages/Categorias";
 import Perfil from "./pages/Perfil";
 import Login from "./pages/Login";
+import ResetPassword from "./pages/ResetPassword";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 const router = createBrowserRouter([
   { path: "/login", element: <Login /> },
+    { path: "/reset-password", element: <ResetPassword /> },
 
   {
     path: "/",

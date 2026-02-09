@@ -1,10 +1,68 @@
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 export default function AdminLayout() {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [avatarUrl, setAvatarUrl] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    async function cargarPerfil() {
+      const { data } = await supabase.auth.getUser();
+      if (!active) return;
+
+      const currentUser = data?.user || null;
+      setUser(currentUser);
+
+      if (!currentUser) return;
+
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("nombre, apellidos, avatar_path")
+        .eq("id", currentUser.id)
+        .maybeSingle();
+
+      if (!active) return;
+
+      setProfile(profileData || null);
+
+      if (profileData?.avatar_path) {
+        const { data: signedData } = await supabase.storage
+          .from("avatars")
+          .createSignedUrl(profileData.avatar_path, 60 * 60);
+
+        if (!active) return;
+
+        if (signedData?.signedUrl) {
+          setAvatarUrl(signedData.signedUrl);
+        } else {
+          const { data: publicData } = supabase.storage
+            .from("avatars")
+            .getPublicUrl(profileData.avatar_path);
+          setAvatarUrl(publicData?.publicUrl || "");
+        }
+      } else {
+        setAvatarUrl("");
+      }
+    }
+
+    cargarPerfil();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const displayName = useMemo(() => {
+    const nombre = profile?.nombre || "";
+    const apellidos = profile?.apellidos || "";
+    return `${nombre} ${apellidos}`.trim();
+  }, [profile?.nombre, profile?.apellidos]);
 
   const cerrarSesion = async () => {
     // Cierre REAL de sesión Supabase
@@ -35,7 +93,19 @@ export default function AdminLayout() {
         className="nav-desktop"
       >
         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          <h2 style={{ textAlign: "center", marginBottom: "30px" }}>Admin</h2>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: "24px" }}>
+            <div style={avatarWrapperStyle}>
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="Avatar" style={avatarStyle} />
+              ) : (
+                <div style={avatarFallbackStyle}>
+                  {(displayName || user?.email || "A").charAt(0).toUpperCase()}
+                </div>
+              )}
+            </div>
+            <h2 style={{ textAlign: "center", margin: "12px 0 4px" }}>Admin</h2>
+            {displayName && <span style={userNameStyle}>{displayName}</span>}
+          </div>
           <NavLink to="/platos" style={linkStyle}>Gestión de Platos</NavLink>
           <NavLink to="/categorias" style={linkStyle}>Gestión de Categorías</NavLink>
           <NavLink to="/perfil" style={linkStyle}>Perfil</NavLink>
@@ -76,6 +146,20 @@ export default function AdminLayout() {
               flexDirection: "column",
             }}
           >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "6px 8px" }}>
+              <div style={avatarWrapperStyleSmall}>
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="Avatar" style={avatarStyle} />
+                ) : (
+                  <div style={avatarFallbackStyleSmall}>
+                    {(displayName || user?.email || "A").charAt(0).toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <span style={userNameStyle}>{displayName || "Usuario"}</span>
+              </div>
+            </div>
             <NavLink to="/platos" style={linkStyle} onClick={() => setMenuOpen(false)}>
               Gestión de Platos
             </NavLink>
@@ -136,4 +220,52 @@ const logoutBtn = {
   borderRadius: "6px",
   cursor: "pointer",
   marginTop: "20px",
+};
+
+const avatarWrapperStyle = {
+  width: "72px",
+  height: "72px",
+  borderRadius: "50%",
+  overflow: "hidden",
+  border: "2px solid rgba(255,255,255,0.2)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "#1f2a44",
+};
+
+const avatarWrapperStyleSmall = {
+  width: "40px",
+  height: "40px",
+  borderRadius: "50%",
+  overflow: "hidden",
+  border: "2px solid rgba(255,255,255,0.2)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "#1f2a44",
+};
+
+const avatarStyle = {
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+};
+
+const avatarFallbackStyle = {
+  color: "#f3f4f6",
+  fontSize: "28px",
+  fontWeight: 600,
+};
+
+const avatarFallbackStyleSmall = {
+  color: "#f3f4f6",
+  fontSize: "16px",
+  fontWeight: 600,
+};
+
+const userNameStyle = {
+  color: "#e5e7eb",
+  fontSize: "14px",
+  textAlign: "center",
 };
