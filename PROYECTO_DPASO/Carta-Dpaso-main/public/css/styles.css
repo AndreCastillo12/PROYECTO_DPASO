@@ -1,0 +1,272 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Arial, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: #fff;
+  color: #1a1a1a;
+}
+
+/* LOGO */
+.logo {
+  width: 60px;
+  border-radius: 50%;
+}
+
+/* ===============================
+   LOADER
+================================ */
+#loader {
+  position: fixed;
+  inset: 0;
+  background: #0b2d4d;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+  transition: opacity .6s ease, visibility .6s ease;
+}
+
+#loader img {
+  width: 120px;
+  border-radius: 50%;
+  animation: spinLogo 1.5s ease-in-out forwards;
+}
+
+@keyframes spinLogo {
+  0% {
+    transform: rotate(0deg) scale(1);
+    opacity: 1;
+  }
+  80% {
+    transform: rotate(360deg) scale(1.05);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+#loader.hide {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* ===============================
+   HEADER
+================================ */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 20px;
+  background: #0b2d4d;
+  color: #fff;
+}
+
+.header-text h1 {
+  font-size: 1.6rem;
+  letter-spacing: 1px;
+}
+
+.header-text p {
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+/* ===============================
+   NAV
+================================ */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #1f4e79;
+  display: flex;
+  justify-content: space-around;
+  padding: 12px 5px;
+}
+
+.nav a {
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: bold;
+  color: #fff;
+}
+
+.nav a:hover {
+  text-decoration: underline;
+}
+
+/* ===============================
+   MENU GRID
+================================ */
+.menu {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  max-width: 1600px;   /* 🔥 evita estiramientos raros */
+  margin: auto;
+}
+
+/* ===============================
+   SECTION TITLE
+================================ */
+.section-title {
+  grid-column: 1 / -1;
+  margin: 30px 0 10px;
+  border-left: 6px solid #1f4e79;
+  padding-left: 12px;
+  color: #0b2d4d;
+}
+
+/* ===============================
+   PLATO CARD
+================================ */
+.plato {
+  background: #fff;
+  border-radius: 14px;
+  padding: 12px;
+  text-align: center;
+  transition: transform .3s;
+  box-shadow: 0 4px 10px rgba(0,0,0,.06);
+  overflow: hidden;
+}
+
+.plato img {
+  width: 100%;
+  height: 220px;
+  object-fit: cover;
+  border-radius: 10px;
+  transition: transform .4s ease;
+}
+
+/* Desktop hover */
+.plato:hover img {
+  transform: scale(1.08);
+}
+
+/* Mobile tap */
+.plato:active img {
+  transform: scale(1.1);
+}
+
+.plato h3 {
+  margin: 10px 0 5px;
+  font-size: 1rem;
+  color: #0b2d4d;
+}
+
+.plato p {
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.plato span {
+  display: block;
+  margin-top: 6px;
+  font-weight: bold;
+  color: #1f4e79;
+}
+
+/* ===============================
+   FOOTER
+================================ */
+footer {
+  background: #0b2d4d;
+  color: #fff;
+  padding: 20px;
+  text-align: center;
+}
+
+.socials img {
+  width: 26px;
+  filter: invert(1);
+  margin: 15px 8px;
+}
+
+/* ===============================
+   ANIMACIONES
+================================ */
+.fade-up {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: .6s;
+}
+
+.fade-up.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ===============================
+   RESPONSIVE GRID
+================================ */
+
+/* Monitores grandes / ultrawide */
+@media (min-width: 1400px) {
+  .menu {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+/* Desktop normal */
+@media (max-width: 1399px) {
+  .menu {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* Tablets */
+@media (max-width: 1024px) {
+  .menu {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .menu {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Mobile pequeño */
+@media (max-width: 480px) {
+  .menu {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ===============================
+   WHATSAPP FLOAT
+================================ */
+.whatsapp-float {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 55px;
+  height: 55px;
+  background: #178d42;
+  border-radius: 60%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 50;
+  transition: transform .3s;
+}
+
+.whatsapp-float img {
+  width: 28px;
+  height: 28px;
+}
+
+.whatsapp-float:hover {
+  transform: scale(1.1);
+}
