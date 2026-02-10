@@ -3,7 +3,107 @@
 // ===============================
 const SUPABASE_URL = 'https://gtczpfxdkiajprnluokq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd0Y3pwZnhka2lhanBybmx1b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTc5MTAsImV4cCI6MjA4NTk3MzkxMH0.UrV46fOq-YFQWykvR-eqPmlr-33w1aC7ynmywu_nsQ8';
+const FALLBACK_IMAGE = 'images/Logos/logo.jpg';
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const animatedElements = new Set();
+const fadeObserver = new IntersectionObserver((entries, observer) => {
+  entries.forEach((entry) => {
+    if (!entry.isIntersecting) return;
+
+    entry.target.classList.add('show');
+    observer.unobserve(entry.target);
+    animatedElements.delete(entry.target);
+  });
+}, { threshold: 0.15 });
+
+function observeFadeElement(element) {
+  if (!element || animatedElements.has(element)) return;
+  animatedElements.add(element);
+  fadeObserver.observe(element);
+}
+
+function buildImageUrl(imageName) {
+  if (!imageName) return FALLBACK_IMAGE;
+  return `${SUPABASE_URL}/storage/v1/object/public/platos/${imageName}`;
+}
+
+function buildPlatoCard(item) {
+  const card = document.createElement('div');
+  card.className = 'plato fade-up';
+
+  const image = document.createElement('img');
+  image.src = buildImageUrl(item.imagen);
+  image.alt = item.nombre;
+
+  const title = document.createElement('h3');
+  title.textContent = item.nombre;
+
+  const description = document.createElement('p');
+  description.textContent = item.descripcion || '';
+
+  const price = document.createElement('span');
+  price.textContent = `S/ ${Number(item.precio).toFixed(2)}`;
+
+  card.append(image, title, description, price);
+  observeFadeElement(card);
+
+  return card;
+}
+
+function buildEmptyCategoryMessage() {
+  const emptyCard = document.createElement('div');
+  emptyCard.className = 'plato fade-up';
+
+  const message = document.createElement('p');
+  message.textContent = 'No hay platos en esta categoría.';
+
+  emptyCard.appendChild(message);
+  observeFadeElement(emptyCard);
+
+  return emptyCard;
+}
+
+function buildCategoryTitle(category) {
+  const title = document.createElement('h2');
+  title.className = 'section-title fade-up';
+  title.id = category.id;
+  title.textContent = category.nombre;
+  observeFadeElement(title);
+
+  return title;
+}
+
+function buildNavLink(category) {
+  const navLink = document.createElement('a');
+  navLink.href = `#${category.id}`;
+  navLink.textContent = category.nombre;
+
+  return navLink;
+}
+
+function groupPlatosByCategory(platos) {
+  return platos.reduce((acc, plato) => {
+    if (!acc.has(plato.categoria_id)) acc.set(plato.categoria_id, []);
+    acc.get(plato.categoria_id).push(plato);
+    return acc;
+  }, new Map());
+}
+
+async function fetchMenuData() {
+  const [platosResponse, categoriasResponse] = await Promise.all([
+    supabaseClient.from('platos').select('*').order('orden', { ascending: true }),
+    supabaseClient.from('categorias').select('*').order('orden', { ascending: true }),
+  ]);
+
+  if (platosResponse.error) throw platosResponse.error;
+  if (categoriasResponse.error) throw categoriasResponse.error;
+
+  return {
+    platos: platosResponse.data || [],
+    categorias: categoriasResponse.data || [],
+  };
+}
 
 // ===============================
 // CARGAR MENÚ Y NAVBAR
@@ -14,103 +114,39 @@ async function cargarMenu() {
   if (!menu || !nav) return;
 
   try {
-    // Traer todos los platos
-    const { data: platosData, error: platosError } = await supabaseClient
-      .from('platos')
-      .select('*')
-      .order('orden', { ascending: true });
+    const { platos, categorias } = await fetchMenuData();
+    const platosByCategory = groupPlatosByCategory(platos);
 
-    if (platosError) throw platosError;
+    const menuFragment = document.createDocumentFragment();
+    const navFragment = document.createDocumentFragment();
 
-    // Traer todas las categorías
-    const { data: categoriasData, error: categoriasError } = await supabaseClient
-      .from('categorias')
-      .select('*')
-      .order('orden', { ascending: true }); // <--- respetamos el orden del dashboard
+    categorias.forEach((category) => {
+      navFragment.appendChild(buildNavLink(category));
+      menuFragment.appendChild(buildCategoryTitle(category));
 
-    if (categoriasError) throw categoriasError;
-
-    // Limpiar menú y navbar
-    menu.innerHTML = '';
-    nav.innerHTML = '';
-
-    // Recorrer todas las categorías
-    categoriasData.forEach(cat => {
-      const items = platosData.filter(p => p.categoria_id === cat.id);
-
-      // ============================
-      // Navbar
-      // ============================
-      const navLink = document.createElement('a');
-      navLink.href = `#${cat.id}`;
-      navLink.textContent = cat.nombre;
-      nav.appendChild(navLink);
-
-      // ============================
-      // Título de categoría
-      // ============================
-      const h2 = document.createElement('h2');
-      h2.className = 'section-title fade-up';
-      h2.id = cat.id;
-      h2.textContent = cat.nombre;
-      menu.appendChild(h2);
-
-      // ============================
-      // Platos
-      // ============================
-      if (items.length > 0) {
-        items.forEach(item => {
-          const div = document.createElement('div');
-          div.className = 'plato fade-up';
-
-          const imageUrl = item.imagen
-            ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
-            : 'images/Logos/logo.jpg';
-
-          div.innerHTML = `
-            <img src="${imageUrl}" alt="${item.nombre}">
-            <h3>${item.nombre}</h3>
-            <p>${item.descripcion || ''}</p>
-            <span>S/ ${Number(item.precio).toFixed(2)}</span>
-          `;
-
-          menu.appendChild(div);
-        });
-      } else {
-        // Si no hay platos
-        const emptyDiv = document.createElement('div');
-        emptyDiv.className = 'plato fade-up';
-        emptyDiv.innerHTML = `<p>No hay platos en esta categoría.</p>`;
-        menu.appendChild(emptyDiv);
+      const categoryItems = platosByCategory.get(category.id) || [];
+      if (categoryItems.length === 0) {
+        menuFragment.appendChild(buildEmptyCategoryMessage());
+        return;
       }
+
+      categoryItems.forEach((item) => {
+        menuFragment.appendChild(buildPlatoCard(item));
+      });
     });
 
-    // ============================
-    // Animaciones
-    // ============================
-    const observer = new IntersectionObserver(entries => {
-      entries.forEach(e => {
-        if (e.isIntersecting) {
-          e.target.classList.add('show');
-          observer.unobserve(e.target);
-        }
-      });
-    }, { threshold: 0.15 });
-
-    document.querySelectorAll('.fade-up').forEach(el =>
-      observer.observe(el)
-    );
-
+    menu.replaceChildren(menuFragment);
+    nav.replaceChildren(navFragment);
   } catch (err) {
     console.error('❌ Error cargando menú:', err);
-    menu.innerHTML = "<p>Error cargando el menú. Revisa la consola.</p>";
+    menu.innerHTML = '<p>Error cargando el menú. Revisa la consola.</p>';
   }
 }
 
 // ===============================
 // REFRESH MANUAL PARA FRONT
 // ===============================
-window.refreshMenu = async function () {
+window.refreshMenu = async function refreshMenu() {
   await cargarMenu();
 };
 

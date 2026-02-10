@@ -1,3 +1,26 @@
+:root {
+  --color-background: #fff;
+  --color-text: #1a1a1a;
+  --color-primary: #0b2d4d;
+  --color-secondary: #1f4e79;
+  --color-accent: #178d42;
+  --color-muted: #555;
+  --color-white: #fff;
+
+  --radius-circle: 50%;
+  --radius-card: 14px;
+  --radius-image: 10px;
+
+  --shadow-card: 0 4px 10px rgba(0, 0, 0, 0.06);
+
+  --transition-base: 0.3s;
+  --transition-fade: 0.6s;
+  --transition-image: 0.4s ease;
+}
+
+/* ===============================
+   BASE
+================================ */
 * {
   margin: 0;
   padding: 0;
@@ -10,14 +33,13 @@ html {
 }
 
 body {
-  background: #fff;
-  color: #1a1a1a;
+  background: var(--color-background);
+  color: var(--color-text);
 }
 
-/* LOGO */
 .logo {
   width: 60px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
 }
 
 /* ===============================
@@ -26,18 +48,23 @@ body {
 #loader {
   position: fixed;
   inset: 0;
-  background: #0b2d4d;
+  background: var(--color-primary);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 2000;
-  transition: opacity .6s ease, visibility .6s ease;
+  transition: opacity var(--transition-fade) ease, visibility var(--transition-fade) ease;
 }
 
 #loader img {
   width: 120px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: spinLogo 1.5s ease-in-out forwards;
+}
+
+#loader.hide {
+  opacity: 0;
+  visibility: hidden;
 }
 
 @keyframes spinLogo {
@@ -45,17 +72,14 @@ body {
     transform: rotate(0deg) scale(1);
     opacity: 1;
   }
+
   80% {
     transform: rotate(360deg) scale(1.05);
   }
+
   100% {
     transform: rotate(360deg) scale(1);
   }
-}
-
-#loader.hide {
-  opacity: 0;
-  visibility: hidden;
 }
 
 /* ===============================
@@ -66,8 +90,8 @@ body {
   align-items: center;
   gap: 15px;
   padding: 20px;
-  background: #0b2d4d;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-white);
 }
 
 .header-text h1 {
@@ -87,7 +111,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: #1f4e79;
+  background: var(--color-secondary);
   display: flex;
   justify-content: space-around;
   padding: 12px 5px;
@@ -97,7 +121,7 @@ body {
   text-decoration: none;
   font-size: 0.85rem;
   font-weight: bold;
-  color: #fff;
+  color: var(--color-white);
 }
 
 .nav a:hover {
@@ -111,31 +135,28 @@ body {
   display: grid;
   gap: 16px;
   padding: 20px;
-  max-width: 1600px;   /* 🔥 evita estiramientos raros */
+  max-width: 1600px;
   margin: auto;
 }
 
-/* ===============================
-   SECTION TITLE
-================================ */
 .section-title {
   grid-column: 1 / -1;
   margin: 30px 0 10px;
-  border-left: 6px solid #1f4e79;
+  border-left: 6px solid var(--color-secondary);
   padding-left: 12px;
-  color: #0b2d4d;
+  color: var(--color-primary);
 }
 
 /* ===============================
-   PLATO CARD
+   CARD
 ================================ */
 .plato {
-  background: #fff;
-  border-radius: 14px;
+  background: var(--color-white);
+  border-radius: var(--radius-card);
   padding: 12px;
   text-align: center;
-  transition: transform .3s;
-  box-shadow: 0 4px 10px rgba(0,0,0,.06);
+  transition: transform var(--transition-base);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 
@@ -143,16 +164,14 @@ body {
   width: 100%;
   height: 220px;
   object-fit: cover;
-  border-radius: 10px;
-  transition: transform .4s ease;
+  border-radius: var(--radius-image);
+  transition: transform var(--transition-image);
 }
 
-/* Desktop hover */
 .plato:hover img {
   transform: scale(1.08);
 }
 
-/* Mobile tap */
 .plato:active img {
   transform: scale(1.1);
 }
@@ -160,27 +179,27 @@ body {
 .plato h3 {
   margin: 10px 0 5px;
   font-size: 1rem;
-  color: #0b2d4d;
+  color: var(--color-primary);
 }
 
 .plato p {
   font-size: 0.85rem;
-  color: #555;
+  color: var(--color-muted);
 }
 
 .plato span {
   display: block;
   margin-top: 6px;
   font-weight: bold;
-  color: #1f4e79;
+  color: var(--color-secondary);
 }
 
 /* ===============================
    FOOTER
 ================================ */
 footer {
-  background: #0b2d4d;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-white);
   padding: 20px;
   text-align: center;
 }
@@ -197,7 +216,7 @@ footer {
 .fade-up {
   opacity: 0;
   transform: translateY(30px);
-  transition: .6s;
+  transition: var(--transition-fade);
 }
 
 .fade-up.show {
@@ -208,36 +227,30 @@ footer {
 /* ===============================
    RESPONSIVE GRID
 ================================ */
-
-/* Monitores grandes / ultrawide */
 @media (min-width: 1400px) {
   .menu {
     grid-template-columns: repeat(5, 1fr);
   }
 }
 
-/* Desktop normal */
 @media (max-width: 1399px) {
   .menu {
     grid-template-columns: repeat(4, 1fr);
   }
 }
 
-/* Tablets */
 @media (max-width: 1024px) {
   .menu {
     grid-template-columns: repeat(3, 1fr);
   }
 }
 
-/* Mobile */
 @media (max-width: 768px) {
   .menu {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
-/* Mobile pequeño */
 @media (max-width: 480px) {
   .menu {
     grid-template-columns: 1fr;
@@ -253,13 +266,13 @@ footer {
   right: 20px;
   width: 55px;
   height: 55px;
-  background: #178d42;
+  background: var(--color-accent);
   border-radius: 60%;
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 50;
-  transition: transform .3s;
+  transition: transform var(--transition-base);
 }
 
 .whatsapp-float img {
