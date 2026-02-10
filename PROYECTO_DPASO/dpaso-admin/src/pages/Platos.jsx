@@ -1,10 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import {
+  createPlato,
+  deletePlato,
+  fetchCategoriasForPlatos,
+  fetchPlatos,
+  removePlatoImage,
+  updatePlato,
+  updatePlatosOrder,
+  uploadPlatoImage,
+} from "../services/dishesService";
 import Sortable from "sortablejs";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import ConfirmModal from "../components/ConfirmModal";
 import LoadingOverlay from "../components/LoadingOverlay";
+import {
+  applyOrderedIdsToCategoria,
+  groupPlatosByCategoria,
+  shouldSkipDragUpdate,
+} from "../utils/platos.utils";
 
 export default function Platos() {
   const [platos, setPlatos] = useState([]);
@@ -54,15 +69,9 @@ export default function Platos() {
   const cargarDatos = useCallback(async () => {
     setLoading(true);
 
-    const { data: platosData, error: platosError } = await supabase
-      .from("platos")
-      .select("*")
-      .order("orden", { ascending: true });
+    const { data: platosData, error: platosError } = await fetchPlatos();
 
-    const { data: categoriasData, error: categoriasError } = await supabase
-      .from("categorias")
-      .select("*")
-      .order("orden", { ascending: true });
+    const { data: categoriasData, error: categoriasError } = await fetchCategoriasForPlatos();
 
     if (platosError) console.error(platosError);
     if (categoriasError) console.error(categoriasError);
@@ -94,33 +103,33 @@ export default function Platos() {
       sortableRefs.current[cat.id] = Sortable.create(listElement, {
         animation: 150,
         onMove: () => !busyRef.current,
-        onEnd: async () => {
-          if (busyRef.current) return;
+        onEnd: async evt => {
+          const orderedIds = Array.from(
+            listElement.querySelectorAll("[data-plato-id]")
+          ).map(node => String(node.dataset.platoId));
+
+          if (shouldSkipDragUpdate({
+            busy: busyRef.current,
+            oldIndex: evt?.oldIndex,
+            newIndex: evt?.newIndex,
+            orderedIds,
+          })) {
+            return;
+          }
 
           try {
             setBusy(true);
 
-            const orderedIds = Array.from(
-              listElement.querySelectorAll("[data-plato-id]")
-            ).map(node => node.dataset.platoId);
-
-            const updatedPlatos = platosRef.current.map(plato => {
-              if (String(plato.categoria_id) !== String(cat.id)) return plato;
-              const index = orderedIds.indexOf(String(plato.id));
-              return index === -1 ? plato : { ...plato, orden: index + 1 };
-            });
+            const updatedPlatos = applyOrderedIdsToCategoria(
+              platosRef.current,
+              cat.id,
+              orderedIds
+            );
 
             setPlatos(updatedPlatos);
             platosRef.current = updatedPlatos;
 
-            for (let i = 0; i < orderedIds.length; i++) {
-              const { error } = await supabase
-                .from("platos")
-                .update({ orden: i + 1 })
-                .eq("id", orderedIds[i]);
-
-              if (error) throw error;
-            }
+            await updatePlatosOrder(orderedIds);
 
             showToast("Orden de platos actualizado ✅");
           } catch (err) {
@@ -189,10 +198,7 @@ export default function Platos() {
       // Subir imagen si viene una nueva
       if (form.imagen) {
         imagenNombre = `${Date.now()}-${form.imagen.name}`;
-        const { error: uploadError } = await supabase
-          .storage
-          .from("platos")
-          .upload(imagenNombre, form.imagen);
+        const { error: uploadError } = await uploadPlatoImage(imagenNombre, form.imagen);
 
         if (uploadError) throw uploadError;
       }
@@ -206,10 +212,7 @@ export default function Platos() {
           ...(imagenNombre && { imagen: imagenNombre })
         };
 
-        const { error } = await supabase
-          .from("platos")
-          .update(payload)
-          .eq("id", form.id);
+        const { error } = await updatePlato(form.id, payload);
 
         if (error) throw error;
 
@@ -231,10 +234,7 @@ export default function Platos() {
           imagen: imagenNombre
         };
 
-        const { data, error } = await supabase
-          .from("platos")
-          .insert([insertPayload])
-          .select();
+        const { data, error } = await createPlato(insertPayload);
 
         if (error) throw error;
 
@@ -266,14 +266,12 @@ export default function Platos() {
       setBusy(true);
 
       // 1) borrar registro
-      const { error } = await supabase.from("platos").delete().eq("id", platoToDelete.id);
+      const { error } = await deletePlato(platoToDelete.id);
       if (error) throw error;
 
       // 2) borrar imagen del storage (si tiene)
       if (platoToDelete.imagen) {
-        const { error: storageError } = await supabase.storage
-          .from("platos")
-          .remove([platoToDelete.imagen]);
+        const { error: storageError } = await removePlatoImage(platoToDelete.imagen);
 
         // si falla, no detengas todo; solo log
         if (storageError) console.warn("No se pudo borrar imagen:", storageError.message);
@@ -290,6 +288,12 @@ export default function Platos() {
       setPlatoToDelete(null);
     }
   }
+
+
+  const platosPorCategoria = useMemo(
+    () => groupPlatosByCategoria(platos, categorias),
+    [platos, categorias]
+  );
 
   if (loading) return <p>Cargando...</p>;
 
@@ -394,7 +398,7 @@ export default function Platos() {
             data-categoria-id={cat.id}
             style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}
           >
-            {platos.filter(p => p.categoria_id === cat.id).map(p => (
+            {(platosPorCategoria.get(String(cat.id)) || []).map(p => (
               <div key={p.id} data-plato-id={p.id} className="card" style={cardStyle}>
                 {p.imagen && (
                   <img
@@ -509,4 +513,4 @@ const cardImgStyle = {
   objectFit: "cover",
   borderRadius: "6px",
   marginBottom: "8px"
-};
+}

@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
+import {
+  createSignedAvatarUrl,
+  fetchProfile,
+  getCurrentUser,
+  getPublicAvatarUrl,
+  removeAvatar,
+  resendVerificationEmail,
+  upsertProfile,
+  uploadAvatar,
+} from "../services/profileService";
 
 const INITIAL_FORM = {
   nombre: "",
@@ -28,7 +37,7 @@ export default function Perfil() {
       setError("");
       setSuccess("");
 
-      const { data, error: userError } = await supabase.auth.getUser();
+      const { data, error: userError } = await getCurrentUser();
       if (!isMounted) return;
 
       if (userError || !data?.user) {
@@ -40,11 +49,7 @@ export default function Perfil() {
       const currentUser = data.user;
       setUser(currentUser);
 
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("nombre, apellidos, telefono, avatar_path")
-        .eq("id", currentUser.id)
-        .maybeSingle();
+      const { data: profileData } = await fetchProfile(currentUser.id);
 
       if (!isMounted) return;
 
@@ -83,16 +88,12 @@ export default function Perfil() {
       if (localAvatarPreview) return;
 
       if (avatarPath) {
-        const { data, error: signedError } = await supabase.storage
-          .from("avatars")
-          .createSignedUrl(avatarPath, 60 * 60);
+        const { data, error: signedError } = await createSignedAvatarUrl(avatarPath);
 
         if (!active) return;
 
         if (signedError || !data?.signedUrl) {
-          const { data: publicData } = supabase.storage
-            .from("avatars")
-            .getPublicUrl(avatarPath);
+          const { data: publicData } = getPublicAvatarUrl(avatarPath);
           setAvatarDisplayUrl(publicData?.publicUrl || "");
           return;
         }
@@ -140,10 +141,7 @@ export default function Perfil() {
     setError("");
     setSuccess("");
 
-    const { error: resendError } = await supabase.auth.resend({
-      type: "signup",
-      email,
-    });
+    const { error: resendError } = await resendVerificationEmail(email);
 
     if (resendError) {
       setError("No se pudo reenviar el correo de verificación.");
@@ -161,9 +159,7 @@ export default function Perfil() {
     const extension = localAvatarFile.name.split(".").pop();
     const fileName = `${user.id}/${Date.now()}.${extension}`;
 
-    const { error: uploadError } = await supabase.storage
-      .from("avatars")
-      .upload(fileName, localAvatarFile, { upsert: true });
+    const { error: uploadError } = await uploadAvatar(fileName, localAvatarFile);
 
     if (uploadError) {
       throw new Error(
@@ -177,9 +173,7 @@ export default function Perfil() {
 
   async function eliminarAvatarStorage(path) {
     if (!path) return;
-    const { error: removeError } = await supabase.storage
-      .from("avatars")
-      .remove([path]);
+    const { error: removeError } = await removeAvatar(path);
     if (removeError) {
       throw new Error(removeError.message || "No se pudo eliminar la foto anterior.");
     }
@@ -198,9 +192,7 @@ export default function Perfil() {
     try {
       await eliminarAvatarStorage(avatarPath);
 
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .upsert({ id: user.id, avatar_path: null }, { onConflict: "id" });
+      const { error: updateError } = await upsertProfile({ id: user.id, avatar_path: null });
 
       if (updateError) throw updateError;
 
@@ -257,9 +249,7 @@ export default function Perfil() {
         avatar_path: nextAvatarPath,
       };
 
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .upsert(payload, { onConflict: "id" });
+      const { error: updateError } = await upsertProfile(payload);
 
       if (updateError) throw updateError;
 
@@ -572,4 +562,4 @@ const successStyle = {
   padding: "10px 12px",
   borderRadius: "8px",
   fontSize: "13px",
-};
+}
