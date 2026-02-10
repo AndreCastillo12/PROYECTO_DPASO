@@ -21,7 +21,9 @@
 /* ===============================
    BASE
 ================================ */
-* {
+*,
+*::before,
+*::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -35,6 +37,12 @@ html {
 body {
   background: var(--color-background);
   color: var(--color-text);
+  overflow-x: hidden;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
 }
 
 .logo {
@@ -239,21 +247,65 @@ footer {
   }
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1023px) {
+  .header {
+    flex-wrap: wrap;
+  }
+
+  .header-text {
+    min-width: 0;
+  }
+
+  .header-text h1,
+  .header-text p {
+    overflow-wrap: anywhere;
+  }
+
+  .nav {
+    flex-wrap: wrap;
+    gap: 8px 10px;
+  }
+
+  .nav a {
+    white-space: nowrap;
+  }
+
   .menu {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
 }
 
 @media (max-width: 768px) {
   .menu {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
 }
 
 @media (max-width: 480px) {
+  .header {
+    gap: 10px;
+    padding: 16px;
+  }
+
+  .header-text h1 {
+    font-size: 1.3rem;
+  }
+
+  .header-text p {
+    font-size: 0.8rem;
+  }
+
+  .nav {
+    justify-content: center;
+  }
+
   .menu {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 16px;
+  }
+
+  .plato img {
+    height: 200px;
   }
 }
 

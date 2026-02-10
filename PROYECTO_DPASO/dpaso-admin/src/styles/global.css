@@ -1,0 +1,16 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui;
+  background: #f4f6f8;
+  overflow-x: hidden;
+}
+
+
+img {
+  max-width: 100%;
+  height: auto;
+}

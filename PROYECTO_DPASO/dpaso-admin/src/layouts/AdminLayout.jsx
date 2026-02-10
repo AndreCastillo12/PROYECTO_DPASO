@@ -12,29 +12,6 @@ export default function AdminLayout() {
   useEffect(() => {
     let active = true;
 
-    async function resolverAvatarUrl(path) {
-      if (!path) {
-        setAvatarUrl("");
-        return;
-      }
-
-      const { data: signedData } = await supabase.storage
-        .from("avatars")
-        .createSignedUrl(path, 60 * 60);
-
-      if (!active) return;
-
-      if (signedData?.signedUrl) {
-        setAvatarUrl(signedData.signedUrl);
-        return;
-      }
-
-      const { data: publicData } = supabase.storage
-        .from("avatars")
-        .getPublicUrl(path);
-      setAvatarUrl(publicData?.publicUrl || "");
-    }
-
     async function cargarPerfil() {
       const { data } = await supabase.auth.getUser();
       if (!active) return;
@@ -54,7 +31,24 @@ export default function AdminLayout() {
 
       setProfile(profileData || null);
 
-      await resolverAvatarUrl(profileData?.avatar_path || "");
+      if (profileData?.avatar_path) {
+        const { data: signedData } = await supabase.storage
+          .from("avatars")
+          .createSignedUrl(profileData.avatar_path, 60 * 60);
+
+        if (!active) return;
+
+        if (signedData?.signedUrl) {
+          setAvatarUrl(signedData.signedUrl);
+        } else {
+          const { data: publicData } = supabase.storage
+            .from("avatars")
+            .getPublicUrl(profileData.avatar_path);
+          setAvatarUrl(publicData?.publicUrl || "");
+        }
+      } else {
+        setAvatarUrl("");
+      }
     }
 
     cargarPerfil();
@@ -70,50 +64,6 @@ export default function AdminLayout() {
     return `${nombre} ${apellidos}`.trim();
   }, [profile?.nombre, profile?.apellidos]);
 
-  useEffect(() => {
-    let active = true;
-
-    async function actualizarDesdeEvento(detail) {
-      if (!detail || !active) return;
-      setProfile((prev) => ({
-        ...prev,
-        nombre: detail.nombre ?? prev?.nombre ?? "",
-        apellidos: detail.apellidos ?? prev?.apellidos ?? "",
-        avatar_path: detail.avatar_path ?? prev?.avatar_path ?? "",
-      }));
-
-      if (typeof detail.avatar_path !== "undefined") {
-        const { data: signedData } = await supabase.storage
-          .from("avatars")
-          .createSignedUrl(detail.avatar_path || "", 60 * 60);
-
-        if (!active) return;
-
-        if (signedData?.signedUrl) {
-          setAvatarUrl(signedData.signedUrl);
-        } else if (detail.avatar_path) {
-          const { data: publicData } = supabase.storage
-            .from("avatars")
-            .getPublicUrl(detail.avatar_path);
-          setAvatarUrl(publicData?.publicUrl || "");
-        } else {
-          setAvatarUrl("");
-        }
-      }
-    }
-
-    const handler = (event) => {
-      actualizarDesdeEvento(event.detail);
-    };
-
-    window.addEventListener("profile-updated", handler);
-
-    return () => {
-      active = false;
-      window.removeEventListener("profile-updated", handler);
-    };
-  }, []);
-
   const cerrarSesion = async () => {
     // Cierre REAL de sesión Supabase
     await supabase.auth.signOut();
@@ -128,7 +78,7 @@ export default function AdminLayout() {
   const toggleMenu = () => setMenuOpen(!menuOpen);
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", flexDirection: "row" }}>
+    <div className="admin-shell" style={{ display: "flex", minHeight: "100vh" }}>
       {/* NAV FIJO / DESKTOP */}
       <nav
         style={{
@@ -156,9 +106,9 @@ export default function AdminLayout() {
             <h2 style={{ textAlign: "center", margin: "12px 0 4px" }}>Admin</h2>
             {displayName && <span style={userNameStyle}>{displayName}</span>}
           </div>
-          <NavLink to="/platos" style={navLinkStyle} className="nav-link">Gestión de Platos</NavLink>
-          <NavLink to="/categorias" style={navLinkStyle} className="nav-link">Gestión de Categorías</NavLink>
-          <NavLink to="/perfil" style={navLinkStyle} className="nav-link">Perfil</NavLink>
+          <NavLink to="/platos" style={linkStyle}>Gestión de Platos</NavLink>
+          <NavLink to="/categorias" style={linkStyle}>Gestión de Categorías</NavLink>
+          <NavLink to="/perfil" style={linkStyle}>Perfil</NavLink>
         </div>
 
         <button onClick={cerrarSesion} style={logoutBtn}>Cerrar Sesión</button>
@@ -167,6 +117,7 @@ export default function AdminLayout() {
       {/* NAV MÓVIL */}
       <div className="nav-mobile" style={{ display: "none", position: "relative" }}>
         <button
+          className="mobile-menu-trigger"
           onClick={toggleMenu}
           style={{
             backgroundColor: "#162447",
@@ -183,6 +134,7 @@ export default function AdminLayout() {
 
         {menuOpen && (
           <div
+            className="mobile-menu-panel"
             style={{
               position: "absolute",
               top: "50px",
@@ -210,13 +162,13 @@ export default function AdminLayout() {
                 <span style={userNameStyle}>{displayName || "Usuario"}</span>
               </div>
             </div>
-            <NavLink to="/platos" style={navLinkStyle} className="nav-link" onClick={() => setMenuOpen(false)}>
+            <NavLink to="/platos" style={linkStyle} onClick={() => setMenuOpen(false)}>
               Gestión de Platos
             </NavLink>
-            <NavLink to="/categorias" style={navLinkStyle} className="nav-link" onClick={() => setMenuOpen(false)}>
+            <NavLink to="/categorias" style={linkStyle} onClick={() => setMenuOpen(false)}>
               Gestión de Categorías
             </NavLink>
-            <NavLink to="/perfil" style={navLinkStyle} className="nav-link" onClick={() => setMenuOpen(false)}>
+            <NavLink to="/perfil" style={linkStyle} onClick={() => setMenuOpen(false)}>
               Perfil
             </NavLink>
 
@@ -229,6 +181,7 @@ export default function AdminLayout() {
 
       {/* CONTENIDO */}
       <main
+        className="admin-main"
         style={{
           flex: 1,
           padding: "20px",
@@ -243,11 +196,57 @@ export default function AdminLayout() {
       {/* RESPONSIVE */}
       <style>{`
         @media (max-width: 768px) {
-          .nav-desktop { display: none; }
-          .nav-mobile { display: block; }
-        }
-        .nav-link:hover {
-          background: rgba(255,255,255,0.12);
+          .admin-shell {
+            flex-direction: column !important;
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+          }
+
+          .nav-desktop {
+            display: none !important;
+            width: 0 !important;
+            min-width: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .nav-mobile {
+            display: block !important;
+            position: sticky !important;
+            top: 0;
+            z-index: 120;
+            background: #f4f4f4;
+            padding: 8px 10px;
+            width: 100%;
+            box-sizing: border-box;
+            flex: 0 0 auto;
+          }
+
+          .mobile-menu-trigger {
+            margin: 0 !important;
+          }
+
+          .mobile-menu-panel {
+            width: min(92vw, 260px) !important;
+            left: 0 !important;
+            top: 46px !important;
+          }
+
+          .admin-main {
+            width: 100%;
+            max-width: 100%;
+            flex: 1 1 auto;
+            height: auto !important;
+            min-height: calc(100vh - 64px);
+            padding: 10px !important;
+            margin: 0;
+            overflow-x: hidden;
+          }
+
+          .admin-main > * {
+            max-width: 100%;
+          }
         }
       `}</style>
     </div>
@@ -263,12 +262,6 @@ const linkStyle = {
   borderRadius: "6px",
   transition: "background 0.2s",
 };
-
-const navLinkStyle = ({ isActive }) => ({
-  ...linkStyle,
-  backgroundColor: isActive ? "rgba(255,255,255,0.12)" : "transparent",
-  borderLeft: isActive ? "3px solid #fca311" : "3px solid transparent",
-});
 
 const logoutBtn = {
   width: "100%",

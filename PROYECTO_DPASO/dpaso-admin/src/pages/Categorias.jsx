@@ -157,7 +157,7 @@ export default function Categorias() {
   }, [categorias]);
 
   return (
-    <div>
+    <div className="categorias-page">
       <Toast toast={toast} />
       <LoadingOverlay open={busy} text="Aplicando cambios..." />
 
@@ -175,7 +175,7 @@ export default function Categorias() {
       <h2>Gestión de Categorías</h2>
 
       <div
-        className="card-form"
+        className="card-form categorias-form"
         style={{
           marginBottom: "20px",
           padding: "16px",
@@ -214,19 +214,48 @@ export default function Categorias() {
         )}
       </div>
 
+
+      <style>{`
+        @media (max-width: 768px) {
+          .categorias-form {
+            width: 100% !important;
+            padding: 12px !important;
+          }
+
+          .categorias-list {
+            gap: 10px !important;
+          }
+
+          .categoria-card {
+            width: calc((100% - 10px) / 2) !important;
+            max-width: none !important;
+            flex: 0 1 calc((100% - 10px) / 2) !important;
+          }
+
+          .categoria-actions {
+            gap: 8px;
+          }
+
+          .categoria-actions button {
+            flex: 1;
+            min-width: 0;
+          }
+        }
+      `}</style>
+
       {loading ? (
         <p>Cargando...</p>
       ) : (
-        <div ref={listRef} style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+        <div ref={listRef} className="categorias-list" style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
           {categorias.map(cat => (
             <div
               key={cat.id}
-              className="card"
+              className="card categoria-card"
               style={{
                 borderRadius: "10px",
                 boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
                 padding: "14px",
-                width: "220px",
+                width: "min(220px, 100%)",
                 backgroundColor: "#fff",
                 position: "relative"
               }}
@@ -234,7 +263,7 @@ export default function Categorias() {
               <h3 style={{ margin: "0 0 6px 0" }}>{cat.nombre}</h3>
               <p style={{ margin: "0 0 10px 0" }}>{cat.descripcion}</p>
 
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "12px" }}>
+              <div className="categoria-actions" style={{ display: "flex", justifyContent: "space-between", marginTop: "12px" }}>
                 <button onClick={() => abrirEditar(cat)} style={btnOrange}>
                   Editar
                 </button>
@@ -255,7 +284,7 @@ const inputStyle = {
   padding: "8px",
   borderRadius: "6px",
   border: "1px solid #ccc",
-  minWidth: "220px",
+  minWidth: "min(220px, 100%)",
   flex: "1"
 };
 
@@ -297,4 +326,4 @@ const btnRed = {
   borderRadius: "6px",
   cursor: "pointer",
   fontWeight: 600
-}
+};
