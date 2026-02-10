@@ -175,6 +175,51 @@ export default function Perfil() {
     return fileName;
   }
 
+  async function eliminarAvatarStorage(path) {
+    if (!path) return;
+    const { error: removeError } = await supabase.storage
+      .from("avatars")
+      .remove([path]);
+    if (removeError) {
+      throw new Error(removeError.message || "No se pudo eliminar la foto anterior.");
+    }
+  }
+
+  async function eliminarFotoPerfil() {
+    if (!avatarPath || !user) {
+      setError("No hay una foto guardada para eliminar.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      await eliminarAvatarStorage(avatarPath);
+
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .upsert({ id: user.id, avatar_path: null }, { onConflict: "id" });
+
+      if (updateError) throw updateError;
+
+      setAvatarPath("");
+      setLocalAvatarFile(null);
+      setSuccess("Foto eliminada correctamente.");
+      window.dispatchEvent(
+        new CustomEvent("profile-updated", {
+          detail: { nombre: form.nombre.trim(), apellidos: form.apellidos.trim(), avatar_path: null },
+        })
+      );
+    } catch (removeError) {
+      console.error(removeError);
+      setError(removeError?.message || "No se pudo eliminar la foto.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function guardarPerfil(event) {
     event.preventDefault();
     setError("");
@@ -197,7 +242,11 @@ export default function Perfil() {
       let nextAvatarPath = avatarPath || null;
 
       if (localAvatarFile) {
-        nextAvatarPath = await subirAvatarLocal();
+        const newPath = await subirAvatarLocal();
+        if (avatarPath && avatarPath !== newPath) {
+          await eliminarAvatarStorage(avatarPath);
+        }
+        nextAvatarPath = newPath;
       }
 
       const payload = {
@@ -217,6 +266,15 @@ export default function Perfil() {
       setAvatarPath(nextAvatarPath || "");
       setLocalAvatarFile(null);
       setSuccess("Perfil actualizado correctamente.");
+      window.dispatchEvent(
+        new CustomEvent("profile-updated", {
+          detail: {
+            nombre: form.nombre.trim(),
+            apellidos: form.apellidos.trim(),
+            avatar_path: nextAvatarPath || null,
+          },
+        })
+      );
     } catch (saveError) {
       console.error(saveError);
       setError(saveError?.message || "No se pudo guardar el perfil. Intenta nuevamente.");
@@ -322,9 +380,14 @@ export default function Perfil() {
             </span>
           </div>
 
-          <button type="submit" style={saving ? { ...btnSave, opacity: 0.7 } : btnSave} disabled={saving}>
-            {saving ? "Guardando..." : "Guardar cambios"}
-          </button>
+          <div style={buttonRowStyle}>
+            <button type="submit" style={saving ? { ...btnSave, opacity: 0.7 } : btnSave} disabled={saving}>
+              {saving ? "Guardando..." : "Guardar cambios"}
+            </button>
+            <button type="button" style={btnOutline} disabled={saving} onClick={eliminarFotoPerfil}>
+              Eliminar foto
+            </button>
+          </div>
         </form>
       </div>
     </div>
@@ -460,11 +523,29 @@ const resendButtonStyle = {
   cursor: "pointer",
 };
 
+const buttonRowStyle = {
+  display: "flex",
+  gap: "12px",
+  flexWrap: "wrap",
+};
+
 const btnSave = {
-  width: "100%",
+  flex: 1,
   backgroundColor: "#178d42",
   color: "#fff",
   border: "none",
+  padding: "12px",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontSize: "15px",
+  fontWeight: "600",
+};
+
+const btnOutline = {
+  flex: 1,
+  backgroundColor: "#fff",
+  color: "#111827",
+  border: "1px solid #d1d5db",
   padding: "12px",
   borderRadius: "10px",
   cursor: "pointer",

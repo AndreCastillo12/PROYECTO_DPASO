@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import Sortable from "sortablejs";
 import Toast from "../components/Toast";
@@ -20,6 +20,9 @@ export default function Platos() {
 
   const fileInputRef = useRef(null);
   const listRefs = useRef({});
+  const sortableRefs = useRef({});
+  const platosRef = useRef([]);
+  const busyRef = useRef(false);
 
   const [form, setForm] = useState({
     id: null,
@@ -48,7 +51,7 @@ export default function Platos() {
     }
   };
 
-  async function cargarDatos() {
+  const cargarDatos = useCallback(async () => {
     setLoading(true);
 
     const { data: platosData, error: platosError } = await supabase
@@ -67,67 +70,87 @@ export default function Platos() {
     setPlatos(platosData || []);
     setCategorias(categoriasData || []);
     setLoading(false);
-  }
-
-  useEffect(() => {
-    cargarDatos();
   }, []);
 
   useEffect(() => {
-    if (!categorias.length) return undefined;
+    cargarDatos();
+  }, [cargarDatos]);
 
-    const sortables = categorias
-      .map(cat => {
-        const listElement = listRefs.current[cat.id];
-        if (!listElement) return null;
+  useEffect(() => {
+    platosRef.current = platos;
+  }, [platos]);
 
-        return Sortable.create(listElement, {
-          animation: 150,
-          onMove: () => !busy,
-          onEnd: async () => {
-            if (busy) return;
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
 
-            try {
-              setBusy(true);
+  useEffect(() => {
+    if (!categorias.length) return;
 
-              const orderedIds = Array.from(
-                listElement.querySelectorAll("[data-plato-id]")
-              ).map(node => node.dataset.platoId);
+    categorias.forEach(cat => {
+      const listElement = listRefs.current[cat.id];
+      if (!listElement || sortableRefs.current[cat.id]) return;
 
-              const updatedPlatos = platos.map(plato => {
-                if (plato.categoria_id !== cat.id) return plato;
-                const index = orderedIds.indexOf(plato.id);
-                return index === -1 ? plato : { ...plato, orden: index + 1 };
-              });
+      sortableRefs.current[cat.id] = Sortable.create(listElement, {
+        animation: 150,
+        onMove: () => !busyRef.current,
+        onEnd: async () => {
+          if (busyRef.current) return;
 
-              setPlatos(updatedPlatos);
+          try {
+            setBusy(true);
 
-              for (let i = 0; i < orderedIds.length; i++) {
-                const { error } = await supabase
-                  .from("platos")
-                  .update({ orden: i + 1 })
-                  .eq("id", orderedIds[i]);
+            const orderedIds = Array.from(
+              listElement.querySelectorAll("[data-plato-id]")
+            ).map(node => node.dataset.platoId);
 
-                if (error) throw error;
-              }
+            const updatedPlatos = platosRef.current.map(plato => {
+              if (String(plato.categoria_id) !== String(cat.id)) return plato;
+              const index = orderedIds.indexOf(String(plato.id));
+              return index === -1 ? plato : { ...plato, orden: index + 1 };
+            });
 
-              showToast("Orden de platos actualizado ✅");
-            } catch (err) {
-              console.error(err);
-              showToast(err.message || "Error actualizando orden", "error");
-              cargarDatos();
-            } finally {
-              setBusy(false);
+            setPlatos(updatedPlatos);
+            platosRef.current = updatedPlatos;
+
+            for (let i = 0; i < orderedIds.length; i++) {
+              const { error } = await supabase
+                .from("platos")
+                .update({ orden: i + 1 })
+                .eq("id", orderedIds[i]);
+
+              if (error) throw error;
             }
-          },
-        });
-      })
-      .filter(Boolean);
 
+            showToast("Orden de platos actualizado ✅");
+          } catch (err) {
+            console.error(err);
+            showToast(err.message || "Error actualizando orden", "error");
+            cargarDatos();
+          } finally {
+            setBusy(false);
+          }
+        },
+      });
+    });
+  }, [categorias, cargarDatos, showToast]);
+
+  useEffect(() => {
+    const currentIds = new Set(categorias.map(cat => String(cat.id)));
+    Object.keys(sortableRefs.current).forEach(id => {
+      if (!currentIds.has(String(id))) {
+        sortableRefs.current[id]?.destroy();
+        delete sortableRefs.current[id];
+      }
+    });
+  }, [categorias]);
+
+  useEffect(() => {
     return () => {
-      sortables.forEach(sortable => sortable?.destroy());
+      Object.values(sortableRefs.current).forEach(sortable => sortable?.destroy());
+      sortableRefs.current = {};
     };
-  }, [categorias, platos, busy]);
+  }, []);
 
   function abrirEditar(p) {
     setForm({

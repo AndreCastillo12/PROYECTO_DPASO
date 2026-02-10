@@ -297,4 +297,4 @@ const btnRed = {
   borderRadius: "6px",
   cursor: "pointer",
   fontWeight: 600
-};
+}

@@ -12,6 +12,29 @@ export default function AdminLayout() {
   useEffect(() => {
     let active = true;
 
+    async function resolverAvatarUrl(path) {
+      if (!path) {
+        setAvatarUrl("");
+        return;
+      }
+
+      const { data: signedData } = await supabase.storage
+        .from("avatars")
+        .createSignedUrl(path, 60 * 60);
+
+      if (!active) return;
+
+      if (signedData?.signedUrl) {
+        setAvatarUrl(signedData.signedUrl);
+        return;
+      }
+
+      const { data: publicData } = supabase.storage
+        .from("avatars")
+        .getPublicUrl(path);
+      setAvatarUrl(publicData?.publicUrl || "");
+    }
+
     async function cargarPerfil() {
       const { data } = await supabase.auth.getUser();
       if (!active) return;
@@ -31,24 +54,7 @@ export default function AdminLayout() {
 
       setProfile(profileData || null);
 
-      if (profileData?.avatar_path) {
-        const { data: signedData } = await supabase.storage
-          .from("avatars")
-          .createSignedUrl(profileData.avatar_path, 60 * 60);
-
-        if (!active) return;
-
-        if (signedData?.signedUrl) {
-          setAvatarUrl(signedData.signedUrl);
-        } else {
-          const { data: publicData } = supabase.storage
-            .from("avatars")
-            .getPublicUrl(profileData.avatar_path);
-          setAvatarUrl(publicData?.publicUrl || "");
-        }
-      } else {
-        setAvatarUrl("");
-      }
+      await resolverAvatarUrl(profileData?.avatar_path || "");
     }
 
     cargarPerfil();
@@ -63,6 +69,50 @@ export default function AdminLayout() {
     const apellidos = profile?.apellidos || "";
     return `${nombre} ${apellidos}`.trim();
   }, [profile?.nombre, profile?.apellidos]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function actualizarDesdeEvento(detail) {
+      if (!detail || !active) return;
+      setProfile((prev) => ({
+        ...prev,
+        nombre: detail.nombre ?? prev?.nombre ?? "",
+        apellidos: detail.apellidos ?? prev?.apellidos ?? "",
+        avatar_path: detail.avatar_path ?? prev?.avatar_path ?? "",
+      }));
+
+      if (typeof detail.avatar_path !== "undefined") {
+        const { data: signedData } = await supabase.storage
+          .from("avatars")
+          .createSignedUrl(detail.avatar_path || "", 60 * 60);
+
+        if (!active) return;
+
+        if (signedData?.signedUrl) {
+          setAvatarUrl(signedData.signedUrl);
+        } else if (detail.avatar_path) {
+          const { data: publicData } = supabase.storage
+            .from("avatars")
+            .getPublicUrl(detail.avatar_path);
+          setAvatarUrl(publicData?.publicUrl || "");
+        } else {
+          setAvatarUrl("");
+        }
+      }
+    }
+
+    const handler = (event) => {
+      actualizarDesdeEvento(event.detail);
+    };
+
+    window.addEventListener("profile-updated", handler);
+
+    return () => {
+      active = false;
+      window.removeEventListener("profile-updated", handler);
+    };
+  }, []);
 
   const cerrarSesion = async () => {
     // Cierre REAL de sesión Supabase
@@ -106,9 +156,9 @@ export default function AdminLayout() {
             <h2 style={{ textAlign: "center", margin: "12px 0 4px" }}>Admin</h2>
             {displayName && <span style={userNameStyle}>{displayName}</span>}
           </div>
-          <NavLink to="/platos" style={linkStyle}>Gestión de Platos</NavLink>
-          <NavLink to="/categorias" style={linkStyle}>Gestión de Categorías</NavLink>
-          <NavLink to="/perfil" style={linkStyle}>Perfil</NavLink>
+          <NavLink to="/platos" style={navLinkStyle} className="nav-link">Gestión de Platos</NavLink>
+          <NavLink to="/categorias" style={navLinkStyle} className="nav-link">Gestión de Categorías</NavLink>
+          <NavLink to="/perfil" style={navLinkStyle} className="nav-link">Perfil</NavLink>
         </div>
 
         <button onClick={cerrarSesion} style={logoutBtn}>Cerrar Sesión</button>
@@ -160,13 +210,13 @@ export default function AdminLayout() {
                 <span style={userNameStyle}>{displayName || "Usuario"}</span>
               </div>
             </div>
-            <NavLink to="/platos" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/platos" style={navLinkStyle} className="nav-link" onClick={() => setMenuOpen(false)}>
               Gestión de Platos
             </NavLink>
-            <NavLink to="/categorias" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/categorias" style={navLinkStyle} className="nav-link" onClick={() => setMenuOpen(false)}>
               Gestión de Categorías
             </NavLink>
-            <NavLink to="/perfil" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/perfil" style={navLinkStyle} className="nav-link" onClick={() => setMenuOpen(false)}>
               Perfil
             </NavLink>
 
@@ -196,6 +246,9 @@ export default function AdminLayout() {
           .nav-desktop { display: none; }
           .nav-mobile { display: block; }
         }
+        .nav-link:hover {
+          background: rgba(255,255,255,0.12);
+        }
       `}</style>
     </div>
   );
@@ -210,6 +263,12 @@ const linkStyle = {
   borderRadius: "6px",
   transition: "background 0.2s",
 };
+
+const navLinkStyle = ({ isActive }) => ({
+  ...linkStyle,
+  backgroundColor: isActive ? "rgba(255,255,255,0.12)" : "transparent",
+  borderLeft: isActive ? "3px solid #fca311" : "3px solid transparent",
+});
 
 const logoutBtn = {
   width: "100%",
