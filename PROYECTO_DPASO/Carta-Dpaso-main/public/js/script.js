@@ -739,7 +739,7 @@ window.refreshMenu = async function () {
 
 // ===============================
 // INIT
-// ===============================
+// ===============================git 
 window.addEventListener('load', async () => {
   loadCart();
   setupCartModalEvents();
