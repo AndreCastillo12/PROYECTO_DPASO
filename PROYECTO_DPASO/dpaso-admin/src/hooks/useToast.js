@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function useToast(duration = 2500) {
   const [toast, setToast] = useState(null); // { msg, type }
@@ -15,6 +15,10 @@ export default function useToast(duration = 2500) {
     if (timerRef.current) clearTimeout(timerRef.current);
     setToast(null);
   };
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
 
   return { toast, showToast, clearToast };
 }
