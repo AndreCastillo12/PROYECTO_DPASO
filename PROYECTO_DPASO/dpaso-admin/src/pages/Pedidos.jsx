@@ -62,9 +62,13 @@ function humanStatus(status) {
 export default function Pedidos() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState("");
+
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orderItems, setOrderItems] = useState([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+
   const [busyOrderId, setBusyOrderId] = useState(null);
 
   const [statusFilter, setStatusFilter] = useState("all");
@@ -85,43 +89,49 @@ export default function Pedidos() {
     [navigate, showToast]
   );
 
-  const loadOrders = useCallback(async () => {
-    setLoading((prev) => (orders.length ? prev : true));
+  const loadOrders = useCallback(
+    async ({ silent = false, notifyOnError = false } = {}) => {
+      if (!silent) setLoading(true);
 
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(30);
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(30);
 
-    if (error) {
-      console.error("Error cargando pedidos:", {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code,
-      });
-      const handled = await handleAuthError(error);
-      if (!handled) showToast("No se pudo cargar pedidos", "error");
-      setLoading(false);
-      return;
-    }
+      if (error) {
+        console.error("Error cargando pedidos:", {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        });
 
-    const rows = data || [];
-    setOrders(rows);
+        const handled = await handleAuthError(error);
+        if (!handled && notifyOnError) {
+          showToast("No se pudo cargar pedidos", "error");
+        }
 
-    if (selectedOrder?.id) {
-      const refreshedSelected = rows.find((item) => item.id === selectedOrder.id);
-      if (refreshedSelected) {
-        setSelectedOrder(refreshedSelected);
+        setOrdersError("No se pudo cargar pedidos.");
+        setLoading(false);
+        return;
       }
-    }
 
-    setLoading(false);
-  }, [handleAuthError, orders.length, selectedOrder?.id, showToast]);
+      const rows = data || [];
+      setOrders(rows);
+      setOrdersError("");
+      setSelectedOrder((prev) => {
+        if (!prev?.id) return prev;
+        return rows.find((item) => item.id === prev.id) || null;
+      });
+
+      setLoading(false);
+    },
+    [handleAuthError, showToast]
+  );
 
   const loadOrderItems = useCallback(
-    async (orderId) => {
+    async (orderId, { notifyOnError = false } = {}) => {
       if (!orderId) return;
 
       setDetailLoading(true);
@@ -139,14 +149,20 @@ export default function Pedidos() {
           code: error.code,
           orderId,
         });
+
         const handled = await handleAuthError(error);
-        if (!handled) showToast("No se pudo cargar el detalle del pedido", "error");
+        if (!handled && notifyOnError) {
+          showToast("No se pudo cargar el detalle del pedido", "error");
+        }
+
+        setDetailError("No se pudo cargar los items del pedido.");
         setOrderItems([]);
         setDetailLoading(false);
         return;
       }
 
       setOrderItems(data || []);
+      setDetailError("");
       setDetailLoading(false);
     },
     [handleAuthError, showToast]
@@ -157,7 +173,12 @@ export default function Pedidos() {
   }, [loadOrders]);
 
   useEffect(() => {
-    if (!selectedOrder?.id) return;
+    if (!selectedOrder?.id) {
+      setOrderItems([]);
+      setDetailError("");
+      return;
+    }
+
     loadOrderItems(selectedOrder.id);
   }, [selectedOrder?.id, loadOrderItems]);
 
@@ -165,8 +186,10 @@ export default function Pedidos() {
     if (!autoRefresh) return undefined;
 
     const intervalId = setInterval(() => {
-      loadOrders();
-      if (selectedOrder?.id) loadOrderItems(selectedOrder.id);
+      loadOrders({ silent: true });
+      if (selectedOrder?.id) {
+        loadOrderItems(selectedOrder.id);
+      }
     }, 20000);
 
     return () => clearInterval(intervalId);
@@ -185,10 +208,6 @@ export default function Pedidos() {
       return customerName.includes(term) || customerPhone.includes(term);
     });
   }, [orders, search, statusFilter]);
-
-  const onSelectOrder = (order) => {
-    setSelectedOrder(order);
-  };
 
   const onChangeStatus = async (newStatus) => {
     if (!selectedOrder?.id || !ORDER_STATUS.includes(newStatus)) return;
@@ -250,7 +269,11 @@ export default function Pedidos() {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
         <h2 style={{ margin: 0 }}>Pedidos</h2>
-        <button type="button" onClick={loadOrders} style={secondaryBtn}>
+        <button
+          type="button"
+          onClick={() => loadOrders({ notifyOnError: true })}
+          style={secondaryBtn}
+        >
           Recargar
         </button>
       </div>
@@ -292,6 +315,8 @@ export default function Pedidos() {
 
           {loading ? (
             <p style={mutedText}>Cargando pedidos...</p>
+          ) : ordersError ? (
+            <p style={errorText}>{ordersError}</p>
           ) : filteredOrders.length === 0 ? (
             <p style={mutedText}>No hay pedidos con los filtros actuales.</p>
           ) : (
@@ -314,7 +339,7 @@ export default function Pedidos() {
                     return (
                       <tr
                         key={order.id}
-                        onClick={() => onSelectOrder(order)}
+                        onClick={() => setSelectedOrder(order)}
                         style={{ ...trStyle, ...(isSelected ? trSelectedStyle : {}) }}
                       >
                         <td style={tdStyle}>#{shortOrderId(order.id)}</td>
@@ -389,6 +414,8 @@ export default function Pedidos() {
               <strong>Items del pedido</strong>
               {detailLoading ? (
                 <p style={mutedText}>Cargando items...</p>
+              ) : detailError ? (
+                <p style={errorText}>{detailError}</p>
               ) : orderItems.length === 0 ? (
                 <p style={mutedText}>Este pedido no tiene items registrados.</p>
               ) : (
@@ -520,6 +547,10 @@ const badgeStyle = {
 
 const mutedText = {
   color: "#6b7280",
+};
+
+const errorText = {
+  color: "#b3261e",
 };
 
 const labelLine = {
