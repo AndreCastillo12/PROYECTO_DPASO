@@ -1,489 +1,601 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
-import Sortable from "sortablejs";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
-import ConfirmModal from "../components/ConfirmModal";
-import LoadingOverlay from "../components/LoadingOverlay";
 
-export default function Platos() {
-  const [platos, setPlatos] = useState([]);
-  const [categorias, setCategorias] = useState([]);
-  const [loading, setLoading] = useState(true);
+const ORDER_STATUS = ["pending", "accepted", "preparing", "ready", "delivered", "cancelled"];
 
-  const { toast, showToast } = useToast(2500);
+const STATUS_STYLES = {
+  pending: { bg: "#f5eed6", color: "#8a6d1f" },
+  accepted: { bg: "#e0ecff", color: "#1e4fa3" },
+  preparing: { bg: "#efe4ff", color: "#6f3db7" },
+  ready: { bg: "#ffe9d8", color: "#bb5f12" },
+  delivered: { bg: "#dff5e8", color: "#1f7a43" },
+  cancelled: { bg: "#ffe0e0", color: "#b3261e" },
+};
 
-  const [busy, setBusy] = useState(false);
+function formatCurrency(value) {
+  const amount = Number(value || 0);
+  return `S/ ${amount.toFixed(2)}`;
+}
 
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [platoToDelete, setPlatoToDelete] = useState(null);
+function shortOrderId(id = "") {
+  return String(id).slice(-8).toUpperCase();
+}
 
-  const fileInputRef = useRef(null);
-  const listRefs = useRef({});
+function formatDate(value) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
+}
 
-  const [form, setForm] = useState({
-    id: null,
-    nombre: "",
-    descripcion: "",
-    precio: "",
-    categoria_id: "",
-    imagen: null,
-    imagenUrl: ""
-  });
+function isAuthError(error) {
+  if (!error) return false;
+  return (
+    error.status === 401 ||
+    error.status === 403 ||
+    error.code === "42501" ||
+    error.code === "PGRST301" ||
+    error.code === "PGRST302"
+  );
+}
 
-  const resetForm = () => {
-    setForm({
-      id: null,
-      nombre: "",
-      descripcion: "",
-      precio: "",
-      categoria_id: "",
-      imagen: null,
-      imagenUrl: ""
-    });
+function normalizePhoneForWa(phoneValue) {
+  const digits = String(phoneValue || "").replace(/\D/g, "");
+  if (!digits) return "";
+  return digits.startsWith("51") ? digits : `51${digits}`;
+}
 
-    // 🔥 Esto es lo que quita el "nombre del archivo" del input file
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+function humanStatus(status) {
+  const map = {
+    pending: "Pendiente",
+    accepted: "Aceptado",
+    preparing: "Preparando",
+    ready: "Listo",
+    delivered: "Entregado",
+    cancelled: "Cancelado",
   };
 
-  async function cargarDatos() {
-    setLoading(true);
+  return map[status] || status;
+}
 
-    const { data: platosData, error: platosError } = await supabase
-      .from("platos")
-      .select("*")
-      .order("orden", { ascending: true });
+export default function Pedidos() {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState("");
 
-    const { data: categoriasData, error: categoriasError } = await supabase
-      .from("categorias")
-      .select("*")
-      .order("orden", { ascending: true });
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [orderItems, setOrderItems] = useState([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
 
-    if (platosError) console.error(platosError);
-    if (categoriasError) console.error(categoriasError);
+  const [busyOrderId, setBusyOrderId] = useState(null);
 
-    setPlatos(platosData || []);
-    setCategorias(categoriasData || []);
-    setLoading(false);
-  }
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
-  useEffect(() => {
-    cargarDatos();
-  }, []);
+  const { toast, showToast } = useToast(2600);
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    if (!categorias.length) return undefined;
+  const handleAuthError = useCallback(
+    async (error) => {
+      if (!isAuthError(error)) return false;
+      showToast("No autorizado. Inicia sesión nuevamente.", "error");
+      await supabase.auth.signOut();
+      navigate("/login", { replace: true });
+      return true;
+    },
+    [navigate, showToast]
+  );
 
-    const sortables = categorias
-      .map(cat => {
-        const listElement = listRefs.current[cat.id];
-        if (!listElement) return null;
+  const loadOrders = useCallback(
+    async ({ silent = false, notifyOnError = false } = {}) => {
+      if (!silent) setLoading(true);
 
-        return Sortable.create(listElement, {
-          animation: 150,
-          onMove: () => !busy,
-          onEnd: async () => {
-            if (busy) return;
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(30);
 
-            try {
-              setBusy(true);
-
-              const orderedIds = Array.from(
-                listElement.querySelectorAll("[data-plato-id]")
-              ).map(node => node.dataset.platoId);
-
-              const updatedPlatos = platos.map(plato => {
-                if (plato.categoria_id !== cat.id) return plato;
-                const index = orderedIds.indexOf(plato.id);
-                return index === -1 ? plato : { ...plato, orden: index + 1 };
-              });
-
-              setPlatos(updatedPlatos);
-
-              for (let i = 0; i < orderedIds.length; i++) {
-                const { error } = await supabase
-                  .from("platos")
-                  .update({ orden: i + 1 })
-                  .eq("id", orderedIds[i]);
-
-                if (error) throw error;
-              }
-
-              showToast("Orden de platos actualizado ✅");
-            } catch (err) {
-              console.error(err);
-              showToast(err.message || "Error actualizando orden", "error");
-              cargarDatos();
-            } finally {
-              setBusy(false);
-            }
-          },
+      if (error) {
+        console.error("Error cargando pedidos:", {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
         });
-      })
-      .filter(Boolean);
 
-    return () => {
-      sortables.forEach(sortable => sortable?.destroy());
-    };
-  }, [categorias, platos, busy]);
+        const handled = await handleAuthError(error);
+        if (!handled && notifyOnError) {
+          showToast("No se pudo cargar pedidos", "error");
+        }
 
-  function abrirEditar(p) {
-    setForm({
-      id: p.id,
-      nombre: p.nombre,
-      descripcion: p.descripcion || "",
-      precio: p.precio,
-      categoria_id: p.categoria_id,
-      imagen: null,
-      imagenUrl: p.imagen
-        ? supabase.storage.from("platos").getPublicUrl(p.imagen).data.publicUrl
-        : ""
+        setOrdersError("No se pudo cargar pedidos.");
+        setLoading(false);
+        return;
+      }
+
+      const rows = data || [];
+      setOrders(rows);
+      setOrdersError("");
+      setSelectedOrder((prev) => {
+        if (!prev?.id) return prev;
+        return rows.find((item) => item.id === prev.id) || null;
+      });
+
+      setLoading(false);
+    },
+    [handleAuthError, showToast]
+  );
+
+  const loadOrderItems = useCallback(
+    async (orderId, { notifyOnError = false } = {}) => {
+      if (!orderId) return;
+
+      setDetailLoading(true);
+      const { data, error } = await supabase
+        .from("order_items")
+        .select("*")
+        .eq("order_id", orderId)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.error("Error cargando items de pedido:", {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+          orderId,
+        });
+
+        const handled = await handleAuthError(error);
+        if (!handled && notifyOnError) {
+          showToast("No se pudo cargar el detalle del pedido", "error");
+        }
+
+        setDetailError("No se pudo cargar los items del pedido.");
+        setOrderItems([]);
+        setDetailLoading(false);
+        return;
+      }
+
+      setOrderItems(data || []);
+      setDetailError("");
+      setDetailLoading(false);
+    },
+    [handleAuthError, showToast]
+  );
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
+
+  useEffect(() => {
+    if (!selectedOrder?.id) {
+      setOrderItems([]);
+      setDetailError("");
+      return;
+    }
+
+    loadOrderItems(selectedOrder.id);
+  }, [selectedOrder?.id, loadOrderItems]);
+
+  useEffect(() => {
+    if (!autoRefresh) return undefined;
+
+    const intervalId = setInterval(() => {
+      loadOrders({ silent: true });
+      if (selectedOrder?.id) {
+        loadOrderItems(selectedOrder.id);
+      }
+    }, 20000);
+
+    return () => clearInterval(intervalId);
+  }, [autoRefresh, loadOrderItems, loadOrders, selectedOrder?.id]);
+
+  const filteredOrders = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    return orders.filter((order) => {
+      const byStatus = statusFilter === "all" || order.estado === statusFilter;
+      if (!byStatus) return false;
+      if (!term) return true;
+
+      const customerName = String(order.nombre_cliente || "").toLowerCase();
+      const customerPhone = String(order.telefono || "").toLowerCase();
+      return customerName.includes(term) || customerPhone.includes(term);
     });
+  }, [orders, search, statusFilter]);
 
-    // si vienes de haber seleccionado algo antes, resetea el file input
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }
+  const onChangeStatus = async (newStatus) => {
+    if (!selectedOrder?.id || !ORDER_STATUS.includes(newStatus)) return;
 
-  function cancelarCambios() {
-    if (busy) return; // si está guardando, no permitir
-    resetForm();
-    showToast("Formulario limpio ✅");
-  }
+    const orderId = selectedOrder.id;
+    setBusyOrderId(orderId);
 
-  async function guardarPlato() {
-    if (busy) return; // evita doble click
-    if (!form.nombre || !form.precio || !form.categoria_id) {
-      return showToast("Completa todos los campos", "error");
+    const { error } = await supabase
+      .from("orders")
+      .update({ estado: newStatus })
+      .eq("id", orderId);
+
+    if (error) {
+      console.error("Error actualizando estado:", {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        orderId,
+        newStatus,
+      });
+
+      const handled = await handleAuthError(error);
+      if (!handled) showToast("No se pudo actualizar el estado", "error");
+      setBusyOrderId(null);
+      return;
     }
 
-    try {
-      setBusy(true);
+    setOrders((prev) => prev.map((item) => (item.id === orderId ? { ...item, estado: newStatus } : item)));
+    setSelectedOrder((prev) => (prev?.id === orderId ? { ...prev, estado: newStatus } : prev));
 
-      let imagenNombre = null;
+    showToast("Estado actualizado ✅", "success");
+    setBusyOrderId(null);
+  };
 
-      // Subir imagen si viene una nueva
-      if (form.imagen) {
-        imagenNombre = `${Date.now()}-${form.imagen.name}`;
-        const { error: uploadError } = await supabase
-          .storage
-          .from("platos")
-          .upload(imagenNombre, form.imagen);
+  const openWhatsApp = () => {
+    if (!selectedOrder) return;
 
-        if (uploadError) throw uploadError;
-      }
-
-      if (form.id) {
-        const payload = {
-          nombre: form.nombre,
-          descripcion: form.descripcion,
-          precio: Number(form.precio),
-          categoria_id: form.categoria_id,
-          ...(imagenNombre && { imagen: imagenNombre })
-        };
-
-        const { error } = await supabase
-          .from("platos")
-          .update(payload)
-          .eq("id", form.id);
-
-        if (error) throw error;
-
-        setPlatos(prev =>
-          prev.map(p =>
-            p.id === form.id
-              ? { ...p, ...payload, imagen: imagenNombre || p.imagen }
-              : p
-          )
-        );
-
-        showToast("Plato actualizado con éxito ✅");
-      } else {
-        const insertPayload = {
-          nombre: form.nombre,
-          descripcion: form.descripcion,
-          precio: Number(form.precio),
-          categoria_id: form.categoria_id,
-          imagen: imagenNombre
-        };
-
-        const { data, error } = await supabase
-          .from("platos")
-          .insert([insertPayload])
-          .select();
-
-        if (error) throw error;
-
-        setPlatos(prev => [...prev, ...(data || [])]);
-        showToast("Plato agregado con éxito ✅");
-      }
-
-      // ✅ Limpia TODO al final
-      resetForm();
-    } catch (err) {
-      console.error(err);
-      showToast(err.message || "Error guardando plato", "error");
-    } finally {
-      setBusy(false);
+    const waPhone = normalizePhoneForWa(selectedOrder.telefono);
+    if (!waPhone) {
+      showToast("No hay teléfono válido para WhatsApp", "error");
+      return;
     }
-  }
 
-  function pedirEliminarPlato(p) {
-    if (busy) return;
-    setPlatoToDelete(p);
-    setConfirmOpen(true);
-  }
+    const message = [
+      `Hola ${selectedOrder.nombre_cliente || "cliente"},`,
+      `tu pedido #${shortOrderId(selectedOrder.id)} está ${humanStatus(selectedOrder.estado).toLowerCase()}.`,
+      `Total ${formatCurrency(selectedOrder.total)}.`,
+      "¡Gracias por comprar en DPASO!",
+    ].join(" ");
 
-  // ✅ BONUS: también eliminar imagen del Storage si existe
-  async function confirmarEliminar() {
-    if (!platoToDelete) return;
-
-    try {
-      setBusy(true);
-
-      // 1) borrar registro
-      const { error } = await supabase.from("platos").delete().eq("id", platoToDelete.id);
-      if (error) throw error;
-
-      // 2) borrar imagen del storage (si tiene)
-      if (platoToDelete.imagen) {
-        const { error: storageError } = await supabase.storage
-          .from("platos")
-          .remove([platoToDelete.imagen]);
-
-        // si falla, no detengas todo; solo log
-        if (storageError) console.warn("No se pudo borrar imagen:", storageError.message);
-      }
-
-      setPlatos(prev => prev.filter(x => x.id !== platoToDelete.id));
-      showToast("Plato eliminado 🗑️");
-    } catch (err) {
-      console.error(err);
-      showToast(err.message || "Error eliminando plato", "error");
-    } finally {
-      setBusy(false);
-      setConfirmOpen(false);
-      setPlatoToDelete(null);
-    }
-  }
-
-  if (loading) return <p>Cargando...</p>;
+    const url = `https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <Toast toast={toast} />
-      <LoadingOverlay open={busy} text="Procesando..." />
 
-      <ConfirmModal
-        open={confirmOpen}
-        title="Eliminar plato"
-        message={`¿Seguro que deseas eliminar "${platoToDelete?.nombre || ""}"? Esta acción no se puede deshacer.`}
-        confirmText="Sí, eliminar"
-        cancelText="Cancelar"
-        onConfirm={confirmarEliminar}
-        onCancel={() => { setConfirmOpen(false); setPlatoToDelete(null); }}
-        danger
-      />
-
-      <h2>Gestión de Platos</h2>
-
-      {/* Formulario */}
-      <div style={formCard}>
-        <input
-          type="text"
-          placeholder="Nombre"
-          value={form.nombre}
-          onChange={e => setForm({ ...form, nombre: e.target.value })}
-          style={inputStyle}
-          disabled={busy}
-        />
-
-        <input
-          type="text"
-          placeholder="Descripción"
-          value={form.descripcion}
-          onChange={e => setForm({ ...form, descripcion: e.target.value })}
-          style={inputStyle}
-          disabled={busy}
-        />
-
-        <input
-          type="number"
-          placeholder="Precio"
-          value={form.precio}
-          onChange={e => setForm({ ...form, precio: e.target.value })}
-          style={{ ...inputStyle, maxWidth: "180px" }}
-          disabled={busy}
-        />
-
-        <select
-          value={form.categoria_id}
-          onChange={e => setForm({ ...form, categoria_id: e.target.value })}
-          style={inputStyle}
-          disabled={busy}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <h2 style={{ margin: 0 }}>Pedidos</h2>
+        <button
+          type="button"
+          onClick={() => loadOrders({ notifyOnError: true })}
+          style={secondaryBtn}
         >
-          <option value="">Selecciona categoría</option>
-          {categorias.map(c => (
-            <option key={c.id} value={c.id}>{c.nombre}</option>
+          Recargar
+        </button>
+      </div>
+
+      <div style={filterCard}>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={inputStyle}>
+          <option value="all">Todos los estados</option>
+          {ORDER_STATUS.map((status) => (
+            <option key={status} value={status}>
+              {humanStatus(status)}
+            </option>
           ))}
         </select>
 
         <input
-          ref={fileInputRef}
-          type="file"
-          disabled={busy}
-          onChange={e => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            setForm({ ...form, imagen: file, imagenUrl: URL.createObjectURL(file) });
-          }}
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ ...inputStyle, minWidth: 220 }}
+          placeholder="Buscar por cliente o teléfono"
         />
 
-        {form.imagenUrl && (
-          <img
-            src={form.imagenUrl}
-            alt="Preview"
-            style={previewImg}
+        <label style={toggleLabel}>
+          <input
+            type="checkbox"
+            checked={autoRefresh}
+            onChange={(e) => setAutoRefresh(e.target.checked)}
           />
-        )}
-
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-          <button onClick={guardarPlato} style={btnGreen} disabled={busy}>
-            {busy ? "Procesando..." : (form.id ? "Guardar Cambios" : "Agregar")}
-          </button>
-
-          <button onClick={cancelarCambios} style={btnGray} disabled={busy}>
-            Cancelar
-          </button>
-        </div>
+          Auto-actualizar (20s)
+        </label>
       </div>
 
-      {/* Platos agrupados por categoría */}
-      {categorias.map(cat => (
-        <div key={cat.id} style={{ marginBottom: "30px" }}>
-          <h3 style={{ marginBottom: "10px" }}>{cat.nombre}</h3>
-
-          <div
-            ref={el => {
-              if (el) listRefs.current[cat.id] = el;
-            }}
-            data-categoria-id={cat.id}
-            style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}
-          >
-            {platos.filter(p => p.categoria_id === cat.id).map(p => (
-              <div key={p.id} data-plato-id={p.id} className="card" style={cardStyle}>
-                {p.imagen && (
-                  <img
-                    src={supabase.storage.from("platos").getPublicUrl(p.imagen).data.publicUrl}
-                    alt={p.nombre}
-                    style={cardImgStyle}
-                  />
-                )}
-
-                <h4 style={{ margin: "6px 0" }}>{p.nombre}</h4>
-                <p style={{ margin: "4px 0" }}>{p.descripcion}</p>
-                <p style={{ fontWeight: "bold", marginTop: "4px" }}>
-                  S/ {Number(p.precio).toFixed(2)}
-                </p>
-
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px" }}>
-                  <button
-                    onClick={() => abrirEditar(p)}
-                    style={{ ...btnSmall, backgroundColor: "#f0ad4e" }}
-                    disabled={busy}
-                  >
-                    Editar
-                  </button>
-
-                  <button
-                    onClick={() => pedirEliminarPlato(p)}
-                    style={{ ...btnSmall, backgroundColor: "#d9534f" }}
-                    disabled={busy}
-                  >
-                    Eliminar
-                  </button>
-                </div>
-              </div>
-            ))}
+      <div className="orders-grid" style={layoutGrid}>
+        <section style={listCard}>
+          <div style={sectionHeader}>
+            <strong>Últimos pedidos</strong>
+            <span style={{ color: "#6b7280", fontSize: 13 }}>{filteredOrders.length} resultado(s)</span>
           </div>
-        </div>
-      ))}
+
+          {loading ? (
+            <p style={mutedText}>Cargando pedidos...</p>
+          ) : ordersError ? (
+            <p style={errorText}>{ordersError}</p>
+          ) : filteredOrders.length === 0 ? (
+            <p style={mutedText}>No hay pedidos con los filtros actuales.</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={tableStyle}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Pedido</th>
+                    <th style={thStyle}>Fecha</th>
+                    <th style={thStyle}>Cliente</th>
+                    <th style={thStyle}>Teléfono</th>
+                    <th style={thStyle}>Modalidad</th>
+                    <th style={thStyle}>Total</th>
+                    <th style={thStyle}>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOrders.map((order) => {
+                    const isSelected = selectedOrder?.id === order.id;
+                    return (
+                      <tr
+                        key={order.id}
+                        onClick={() => setSelectedOrder(order)}
+                        style={{ ...trStyle, ...(isSelected ? trSelectedStyle : {}) }}
+                      >
+                        <td style={tdStyle}>#{shortOrderId(order.id)}</td>
+                        <td style={tdStyle}>{formatDate(order.created_at)}</td>
+                        <td style={tdStyle}>{order.nombre_cliente || "-"}</td>
+                        <td style={tdStyle}>{order.telefono || "-"}</td>
+                        <td style={tdStyle}>{order.modalidad || "-"}</td>
+                        <td style={tdStyle}>{formatCurrency(order.total)}</td>
+                        <td style={tdStyle}>
+                          <span style={{ ...badgeStyle, ...getStatusStyle(order.estado) }}>{humanStatus(order.estado)}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <aside style={detailCard}>
+          {!selectedOrder ? (
+            <p style={mutedText}>Selecciona un pedido para ver su detalle.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <h3 style={{ margin: 0 }}>Pedido #{shortOrderId(selectedOrder.id)}</h3>
+                <span style={{ ...badgeStyle, ...getStatusStyle(selectedOrder.estado) }}>
+                  {humanStatus(selectedOrder.estado)}
+                </span>
+              </div>
+
+              <p style={labelLine}><strong>Fecha:</strong> {formatDate(selectedOrder.created_at)}</p>
+              <p style={labelLine}><strong>Cliente:</strong> {selectedOrder.nombre_cliente || "-"}</p>
+              <p style={labelLine}><strong>Teléfono:</strong> {selectedOrder.telefono || "-"}</p>
+              <p style={labelLine}><strong>Modalidad:</strong> {selectedOrder.modalidad || "-"}</p>
+
+              {selectedOrder.modalidad === "Delivery" && (
+                <>
+                  <p style={labelLine}><strong>Dirección:</strong> {selectedOrder.direccion || "-"}</p>
+                  <p style={labelLine}><strong>Referencia:</strong> {selectedOrder.referencia || "-"}</p>
+                </>
+              )}
+
+              <p style={labelLine}><strong>Comentario:</strong> {selectedOrder.comentario || "-"}</p>
+
+              <div style={statusControlWrap}>
+                <label htmlFor="estado-order" style={{ fontWeight: 600, color: "#162447" }}>
+                  Cambiar estado
+                </label>
+                <select
+                  id="estado-order"
+                  style={inputStyle}
+                  value={selectedOrder.estado || "pending"}
+                  disabled={busyOrderId === selectedOrder.id}
+                  onChange={(e) => onChangeStatus(e.target.value)}
+                >
+                  {ORDER_STATUS.map((status) => (
+                    <option key={status} value={status}>
+                      {humanStatus(status)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button type="button" style={whatsappBtn} onClick={openWhatsApp}>
+                WhatsApp cliente
+              </button>
+
+              <hr style={{ border: 0, borderTop: "1px solid #e5e7eb", margin: "4px 0" }} />
+
+              <strong>Items del pedido</strong>
+              {detailLoading ? (
+                <p style={mutedText}>Cargando items...</p>
+              ) : detailError ? (
+                <p style={errorText}>{detailError}</p>
+              ) : orderItems.length === 0 ? (
+                <p style={mutedText}>Este pedido no tiene items registrados.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {orderItems.map((item) => (
+                    <div key={item.id} style={itemRow}>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{item.nombre_snapshot}</div>
+                        <div style={{ fontSize: 13, color: "#6b7280" }}>Cantidad: {item.cantidad}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 13, color: "#6b7280" }}>Precio: {formatCurrency(item.precio_snapshot)}</div>
+                        <div style={{ fontWeight: 600 }}>Subtotal: {formatCurrency(item.subtotal)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+                <strong>Total final</strong>
+                <strong>{formatCurrency(selectedOrder.total)}</strong>
+              </div>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      <style>{`
+        @media (max-width: 1080px) {
+          .orders-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+      `}</style>
     </div>
   );
 }
 
-/* ================== STYLES ================== */
-const formCard = {
+function getStatusStyle(status) {
+  return STATUS_STYLES[status] || { bg: "#e5e7eb", color: "#374151" };
+}
+
+const filterCard = {
   display: "flex",
-  flexDirection: "column",
-  gap: "12px",
-  padding: "35px",
-  borderRadius: "12px",
-  backgroundColor: "#fff",
-  boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-  maxWidth: "700px",
-  width: "100%",
+  alignItems: "center",
+  gap: 10,
+  flexWrap: "wrap",
+  background: "#fff",
+  borderRadius: 12,
+  padding: 12,
+  boxShadow: "0 4px 14px rgba(0,0,0,.06)",
+};
+
+const layoutGrid = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.6fr) minmax(320px, 1fr)",
+  gap: 14,
+};
+
+const listCard = {
+  background: "#fff",
+  borderRadius: 12,
+  padding: 12,
+  boxShadow: "0 4px 14px rgba(0,0,0,.06)",
+};
+
+const detailCard = {
+  background: "#fff",
+  borderRadius: 12,
+  padding: 12,
+  boxShadow: "0 4px 14px rgba(0,0,0,.06)",
+  minHeight: 220,
+};
+
+const sectionHeader = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  marginBottom: 10,
 };
 
 const inputStyle = {
-  padding: "10px",
-  borderRadius: "6px",
-  border: "1px solid #ccc",
-  width: "100%"
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "9px 10px",
+  fontSize: 14,
+  background: "#fff",
 };
 
-const previewImg = {
-  width: "200px",
-  borderRadius: "6px",
-  objectFit: "cover"
-};
-
-const btnGreen = {
-  backgroundColor: "#178d42",
-  color: "#fff",
-  border: "none",
-  padding: "10px 14px",
-  borderRadius: "6px",
-  cursor: "pointer",
-  fontWeight: 600
-};
-
-const btnGray = {
-  backgroundColor: "#6c757d",
-  color: "#fff",
-  border: "none",
-  padding: "10px 14px",
-  borderRadius: "6px",
-  cursor: "pointer",
-  fontWeight: 600
-};
-
-const btnSmall = {
-  color: "#fff",
-  border: "none",
-  padding: "6px 10px",
-  borderRadius: "6px",
-  cursor: "pointer",
-  fontSize: "0.9rem",
-  fontWeight: 600
-};
-
-const cardStyle = {
-  borderRadius: "10px",
-  boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-  padding: "12px",
-  width: "220px",
-  backgroundColor: "#fff",
-  display: "flex",
-  flexDirection: "column",
-  cursor: "grab"
-};
-
-const cardImgStyle = {
+const tableStyle = {
   width: "100%",
-  height: "140px",
-  objectFit: "cover",
-  borderRadius: "6px",
-  marginBottom: "8px"
+  borderCollapse: "collapse",
+  minWidth: 760,
+};
+
+const thStyle = {
+  textAlign: "left",
+  borderBottom: "1px solid #e5e7eb",
+  color: "#6b7280",
+  fontSize: 13,
+  padding: "8px 6px",
+  whiteSpace: "nowrap",
+};
+
+const tdStyle = {
+  borderBottom: "1px solid #f1f5f9",
+  padding: "10px 6px",
+  fontSize: 14,
+  verticalAlign: "middle",
+};
+
+const trStyle = {
+  cursor: "pointer",
+};
+
+const trSelectedStyle = {
+  backgroundColor: "#f3f8ff",
+};
+
+const badgeStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  borderRadius: 999,
+  padding: "4px 10px",
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const mutedText = {
+  color: "#6b7280",
+};
+
+const errorText = {
+  color: "#b3261e",
+};
+
+const labelLine = {
+  margin: 0,
+  color: "#111827",
+};
+
+const itemRow = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 10,
+  border: "1px solid #e5e7eb",
+  borderRadius: 8,
+  padding: "8px 10px",
+};
+
+const secondaryBtn = {
+  backgroundColor: "#1f4068",
+  color: "#fff",
+  border: "none",
+  borderRadius: 8,
+  padding: "8px 12px",
+  cursor: "pointer",
+};
+
+const whatsappBtn = {
+  backgroundColor: "#25d366",
+  color: "#fff",
+  border: "none",
+  borderRadius: 8,
+  padding: "10px 12px",
+  cursor: "pointer",
+  fontWeight: 600,
+};
+
+const toggleLabel = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 14,
+  color: "#374151",
+};
+
+const statusControlWrap = {
+  display: "grid",
+  gap: 6,
 };
