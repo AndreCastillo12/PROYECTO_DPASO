@@ -17,12 +17,124 @@
 <!-- WHATSAPP -->
 <a href="https://wa.me/51941552878?text=Hola%20DPASO,%20quisiera%20hacer%20un%20pedido"
    class="whatsapp-float"
-   target="_blank">
+   target="_blank"
+   rel="noopener noreferrer">
   <img src="images/Logos/whatsapp.png" alt="WhatsApp">
 </a>
 
+<!-- CARRITO FLOAT -->
+<button id="cart-float-btn" class="cart-float" type="button" aria-label="Abrir carrito">
+  <span class="cart-icon">🛒</span>
+  <span id="cart-badge" class="cart-badge">0</span>
+</button>
+
+<!-- MODAL CARRITO/CHECKOUT -->
+<div id="cart-modal" class="cart-modal" aria-hidden="true">
+  <div class="cart-modal-content">
+    <button id="cart-close-btn" class="cart-close" type="button" aria-label="Cerrar carrito">×</button>
+    <h2>Tu pedido</h2>
+    <p id="store-status-banner" class="store-status-banner" style="display:none;"></p>
+
+    <div id="cart-items" class="cart-items"></div>
+    <p id="cart-empty" class="cart-empty">Tu carrito está vacío.</p>
+
+    <div class="cart-total-row">
+      <span>Subtotal:</span>
+      <strong id="cart-subtotal">S/ 0.00</strong>
+    </div>
+
+    <div id="cart-delivery-row" class="cart-total-row" style="display:none;">
+      <span>Delivery:</span>
+      <strong id="cart-delivery-fee">S/ 0.00</strong>
+    </div>
+
+    <div class="cart-total-row cart-total-final">
+      <strong>Total final:</strong>
+      <strong id="cart-total">S/ 0.00</strong>
+    </div>
+
+    <p id="delivery-min-note" class="delivery-min-note" style="display:none;"></p>
+
+    <button id="go-checkout-btn" class="go-checkout-btn" type="button" style="display:none;">Continuar con tus datos</button>
+
+    <div id="checkout-section" class="checkout-section" style="display:none;">
+      <form id="checkout-form" class="checkout-form">
+        <div class="checkout-header-row">
+          <h3>Completa tus datos</h3>
+          <button id="back-to-cart-btn" class="back-to-cart-btn" type="button">← Volver al carrito</button>
+        </div>
+
+      <label for="checkout-nombre">Nombre *</label>
+      <input id="checkout-nombre" name="nombre" type="text" required>
+
+      <label for="checkout-telefono">Teléfono *</label>
+      <input id="checkout-telefono" name="telefono" type="tel" inputmode="numeric" pattern="[0-9]{9}" maxlength="9" minlength="9" required>
+
+      <label for="checkout-modalidad">Modalidad *</label>
+      <select id="checkout-modalidad" name="modalidad" required>
+        <option value="Delivery">Delivery</option>
+        <option value="Recojo">Recojo</option>
+      </select>
+
+      <div id="direccion-group" class="checkout-conditional-group">
+        <label for="checkout-direccion">Dirección <span id="direccion-required">*</span></label>
+        <input id="checkout-direccion" name="direccion" type="text" placeholder="Obligatorio si es Delivery">
+      </div>
+
+      <div id="delivery-zone-group" class="checkout-conditional-group" style="display:none;">
+        <label for="checkout-provincia">Provincia *</label>
+        <select id="checkout-provincia" name="provincia">
+          <option value="">Selecciona provincia</option>
+        </select>
+
+        <label for="checkout-distrito">Distrito *</label>
+        <select id="checkout-distrito" name="distrito">
+          <option value="">Selecciona distrito</option>
+        </select>
+
+        <p id="delivery-zone-feedback" class="delivery-zone-feedback" style="display:none;"></p>
+      </div>
+
+      <p id="pickup-location" class="pickup-location" style="display:none;">📍 Recojo en local: Mz WI Lt. 37, Calle 46 San Antonio de Carapongo</p>
+
+      <div id="referencia-group" class="checkout-conditional-group">
+        <label for="checkout-referencia">Referencia</label>
+        <input id="checkout-referencia" name="referencia" type="text">
+      </div>
+
+      <label for="checkout-comentario">Comentario</label>
+      <textarea id="checkout-comentario" name="comentario" rows="3"></textarea>
+
+      <p id="checkout-feedback" class="checkout-feedback"></p>
+
+      <button id="confirm-order-btn" class="checkout-confirm" type="submit">Confirmar pedido</button>
+      <a id="whatsapp-order-btn" class="checkout-whatsapp" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Enviar por WhatsApp</a>
+      </form>
+    </div>
+  </div>
+</div>
+
+
+<div id="receipt-modal" class="cart-modal" aria-hidden="true">
+  <div class="cart-modal-content receipt-modal-content">
+    <button id="receipt-close-btn" class="cart-close" type="button" aria-label="Cerrar comprobante">×</button>
+    <h2>✅ Pedido creado con éxito</h2>
+    <p class="receipt-subtitle">Aquí tienes tu comprobante para mostrarlo o compartirlo.</p>
+    <div id="order-receipt" class="order-receipt" style="display:none;">
+      <h4>Comprobante de pedido</h4>
+      <div id="order-receipt-content" class="order-receipt-content"></div>
+    </div>
+    <div class="receipt-actions">
+      <button id="download-receipt-btn" class="receipt-download-btn" type="button">Descargar comprobante (PDF)</button>
+      <a id="receipt-whatsapp-btn" class="checkout-whatsapp" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Enviar por WhatsApp</a>
+    </div>
+  </div>
+</div>
+
+<div id="cart-toast" class="cart-toast" aria-live="polite"></div>
+
 <header class="header">
-  <img src="images/Logos/logo.jpg" class="logo">
+  <img src="images/Logos/logo.jpg" class="logo" alt="Logo DPASO">
   <div class="header-text">
     <h1>CARTA DPASO</h1>
     <p>Cocina Libre · Pescados & Mariscos</p>
@@ -42,14 +154,14 @@
 <footer>
   <p>📍 Mz WI Lt. 37, Calle 46 San Antonio de Carapongo</p>
   <div class="socials">
-    <a href="https://www.facebook.com/profile.php?id=61575799342894" target="_blank">
-      <img src="images/Logos/facebook.png">
+    <a href="https://www.facebook.com/profile.php?id=61575799342894" target="_blank" rel="noopener noreferrer">
+      <img src="images/Logos/facebook.png" alt="Facebook">
     </a>
-    <a href="https://www.instagram.com/dpaso_cocina_libre/" target="_blank">
-      <img src="images/Logos/instagram.png">
+    <a href="https://www.instagram.com/dpaso_cocina_libre/" target="_blank" rel="noopener noreferrer">
+      <img src="images/Logos/instagram.png" alt="Instagram">
     </a>
-    <a href="https://www.tiktok.com/@dpaso.barra.marin" target="_blank">
-      <img src="images/Logos/tiktok.png">
+    <a href="https://www.tiktok.com/@dpaso.barra.marin" target="_blank" rel="noopener noreferrer">
+      <img src="images/Logos/tiktok.png" alt="TikTok">
     </a>
   </div>
 </footer>
