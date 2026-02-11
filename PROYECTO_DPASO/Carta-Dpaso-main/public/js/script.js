@@ -10,6 +10,15 @@ const WA_PHONE = '51941552878';
 
 let cart = [];
 let lastOrderData = null;
+let cartToastTimer = null;
+let checkoutStepOpen = false;
+
+function normalizeModalidad(rawValue) {
+  const value = String(rawValue || '').trim().toLowerCase();
+  if (value === 'delivery') return 'Delivery';
+  if (value === 'recojo') return 'Recojo';
+  return 'Delivery';
+}
 
 // ===============================
 // HELPERS
@@ -51,6 +60,27 @@ function showFeedback(message, type = 'info') {
   feedback.className = `checkout-feedback ${type}`;
 }
 
+function clearFeedback() {
+  const feedback = document.getElementById('checkout-feedback');
+  if (!feedback) return;
+  feedback.textContent = '';
+  feedback.className = 'checkout-feedback';
+}
+
+function showCartToast(message) {
+  const toast = document.getElementById('cart-toast');
+  if (!toast) return;
+
+  toast.textContent = message;
+  toast.classList.add('show');
+
+  if (cartToastTimer) clearTimeout(cartToastTimer);
+
+  cartToastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+  }, 1800);
+}
+
 function buildWhatsAppMessage(orderData) {
   const itemsTxt = orderData.items
     .map(it => `- ${it.nombre} x${it.cantidad} (${formatCurrency(it.precio)} c/u) = ${formatCurrency(it.subtotal)}`)
@@ -75,9 +105,139 @@ function buildWhatsAppMessage(orderData) {
   return `https://wa.me/${WA_PHONE}?text=${encodeURIComponent(lines.join('\n'))}`;
 }
 
+
+function openReceiptModal() {
+  const modal = document.getElementById('receipt-modal');
+  if (!modal) return;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeReceiptModal() {
+  const modal = document.getElementById('receipt-modal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function renderReceipt(orderData) {
+  const receiptBox = document.getElementById('order-receipt');
+  const receiptContent = document.getElementById('order-receipt-content');
+  const receiptWhatsAppBtn = document.getElementById('receipt-whatsapp-btn');
+  if (!receiptBox || !receiptContent || !orderData) return;
+
+  const shortId = getShortOrderId(orderData.id);
+  const lines = orderData.items.map((it) => `${it.nombre} · Cantidad: ${it.cantidad} · Precio: ${formatCurrency(it.precio)}`);
+
+  receiptContent.innerHTML = `
+    <p><strong>Pedido:</strong> #${shortId}</p>
+    <p><strong>Cliente:</strong> ${orderData.nombre_cliente}</p>
+    <p><strong>Teléfono:</strong> ${orderData.telefono}</p>
+    <p><strong>Modalidad:</strong> ${orderData.modalidad}</p>
+    <p><strong>Total:</strong> ${formatCurrency(orderData.total)}</p>
+    <p><strong>Items:</strong></p>
+    ${lines.map((line) => `<p>• ${line}</p>`).join('')}
+  `;
+
+  if (receiptWhatsAppBtn) {
+    receiptWhatsAppBtn.href = buildWhatsAppMessage(orderData);
+    receiptWhatsAppBtn.style.display = 'inline-flex';
+  }
+
+  receiptBox.style.display = 'block';
+}
+
+function hideReceipt() {
+  const receiptBox = document.getElementById('order-receipt');
+  const receiptContent = document.getElementById('order-receipt-content');
+  const receiptWhatsAppBtn = document.getElementById('receipt-whatsapp-btn');
+
+  if (receiptBox) receiptBox.style.display = 'none';
+  if (receiptContent) receiptContent.innerHTML = '';
+  if (receiptWhatsAppBtn) {
+    receiptWhatsAppBtn.style.display = 'none';
+    receiptWhatsAppBtn.href = '#';
+  }
+}
+
+function buildReceiptText(orderData) {
+  const shortId = getShortOrderId(orderData.id);
+  const itemsText = orderData.items
+    .map((it) => `- ${it.nombre} | Cantidad: ${it.cantidad} | Precio: ${formatCurrency(it.precio)}`)
+    .join('\n');
+
+  return [
+    'DPASO - Comprobante de pedido',
+    `Pedido: #${shortId}`,
+    `Cliente: ${orderData.nombre_cliente}`,
+    `Teléfono: ${orderData.telefono}`,
+    `Modalidad: ${orderData.modalidad}`,
+    `Total: ${formatCurrency(orderData.total)}`,
+    'Items:',
+    itemsText
+  ].join('\n');
+}
+
+function downloadReceiptPdf(orderData) {
+  if (!orderData) return;
+
+  const shortId = getShortOrderId(orderData.id);
+  const receiptHtml = `
+    <html>
+      <head>
+        <title>Comprobante ${shortId}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; color: #1a1a1a; }
+          h2 { margin-bottom: 6px; color: #0b2d4d; }
+          p { margin: 4px 0; }
+          .box { border: 1px dashed #88a9c7; border-radius: 10px; padding: 12px; }
+        </style>
+      </head>
+      <body>
+        <h2>DPASO - Comprobante de pedido</h2>
+        <div class="box">
+          ${buildReceiptText(orderData).split('\n').map((line) => `<p>${line}</p>`).join('')}
+        </div>
+      </body>
+    </html>
+  `;
+
+  const printWindow = window.open('', '_blank', 'width=720,height=840');
+  if (!printWindow) return;
+
+  printWindow.document.open();
+  printWindow.document.write(receiptHtml);
+  printWindow.document.close();
+
+  setTimeout(() => {
+    printWindow.focus();
+    printWindow.print();
+  }, 300);
+}
+
 // ===============================
 // UI CARRITO
 // ===============================
+
+function toggleCheckoutSection(forceOpen = false) {
+  const goCheckoutBtn = document.getElementById('go-checkout-btn');
+  const checkoutSection = document.getElementById('checkout-section');
+
+  if (!goCheckoutBtn || !checkoutSection) return;
+
+  if (!cart.length) {
+    checkoutStepOpen = false;
+    goCheckoutBtn.style.display = 'none';
+    checkoutSection.style.display = 'none';
+    return;
+  }
+
+  if (forceOpen) checkoutStepOpen = true;
+
+  goCheckoutBtn.style.display = checkoutStepOpen ? 'none' : 'block';
+  checkoutSection.style.display = checkoutStepOpen ? 'block' : 'none';
+}
+
 function updateCartBadge() {
   const badge = document.getElementById('cart-badge');
   if (!badge) return;
@@ -134,6 +294,15 @@ function clearCartAndForm() {
   const form = document.getElementById('checkout-form');
   if (form) form.reset();
 
+  const whatsappBtn = document.getElementById('whatsapp-order-btn');
+  if (whatsappBtn) {
+    whatsappBtn.style.display = 'none';
+    whatsappBtn.href = '#';
+  }
+
+  checkoutStepOpen = false;
+  toggleCheckoutSection(false);
+  clearFeedback();
   updateDireccionRequired();
 }
 
@@ -165,39 +334,75 @@ function renderCartModal() {
   } else {
     emptyText.style.display = 'none';
 
+    if (checkoutStepOpen) {
+      const previewInfo = document.createElement('p');
+      previewInfo.className = 'cart-preview-info';
+      previewInfo.textContent = 'Vista previa del pedido. Para editar platos, vuelve al carrito.';
+      itemsContainer.appendChild(previewInfo);
+    }
+
     cart.forEach(item => {
       const row = document.createElement('div');
       row.className = 'cart-item';
-      row.innerHTML = `
-        <img src="${item.imagen}" alt="${item.nombre}">
-        <div class="cart-item-data">
-          <h4>${item.nombre}</h4>
-          <p>${formatCurrency(item.precio)}</p>
-          <div class="cart-item-actions">
-            <button type="button" data-action="minus" data-id="${item.id}">-</button>
-            <span>${item.cantidad}</span>
-            <button type="button" data-action="plus" data-id="${item.id}">+</button>
-            <button type="button" data-action="delete" data-id="${item.id}" class="danger">Eliminar</button>
+
+      if (checkoutStepOpen) {
+        row.innerHTML = `
+          <img src="${item.imagen}" alt="${item.nombre}">
+          <div class="cart-item-data">
+            <h4>${item.nombre}</h4>
+            <p>Cantidad: ${item.cantidad}</p>
+            <p>Precio: ${formatCurrency(item.precio)}</p>
           </div>
-        </div>
-      `;
+        `;
+      } else {
+        row.innerHTML = `
+          <img src="${item.imagen}" alt="${item.nombre}">
+          <div class="cart-item-data">
+            <h4>${item.nombre}</h4>
+            <p>${formatCurrency(item.precio)}</p>
+            <div class="cart-item-actions">
+              <button type="button" data-action="minus" data-id="${item.id}">-</button>
+              <span>${item.cantidad}</span>
+              <button type="button" data-action="plus" data-id="${item.id}">+</button>
+              <button type="button" data-action="delete" data-id="${item.id}" class="danger">Eliminar</button>
+            </div>
+          </div>
+        `;
+      }
+
       itemsContainer.appendChild(row);
     });
   }
 
   totalNode.textContent = formatCurrency(getCartTotal());
+  toggleCheckoutSection(false);
 }
+
 
 function updateDireccionRequired() {
   const modalidad = document.getElementById('checkout-modalidad');
   const direccion = document.getElementById('checkout-direccion');
   const marker = document.getElementById('direccion-required');
+  const direccionGroup = document.getElementById('direccion-group');
+  const pickupLocation = document.getElementById('pickup-location');
+  const referenciaGroup = document.getElementById('referencia-group');
 
-  if (!modalidad || !direccion || !marker) return;
+  if (!modalidad || !direccion || !marker || !direccionGroup || !pickupLocation || !referenciaGroup) return;
 
-  const isDelivery = modalidad.value === 'Delivery';
+  const selected = normalizeModalidad(modalidad.value);
+  const isDelivery = selected === 'Delivery';
+
   direccion.required = isDelivery;
   marker.style.visibility = isDelivery ? 'visible' : 'hidden';
+  direccionGroup.classList.toggle('hidden', !isDelivery);
+  pickupLocation.style.display = isDelivery ? 'none' : 'block';
+  referenciaGroup.style.display = isDelivery ? 'grid' : 'none';
+
+  if (!isDelivery) {
+    direccion.value = '';
+    const referenciaInput = document.getElementById('checkout-referencia');
+    if (referenciaInput) referenciaInput.value = '';
+  }
 }
 
 function setupCartModalEvents() {
@@ -206,6 +411,10 @@ function setupCartModalEvents() {
   const modal = document.getElementById('cart-modal');
   const itemsContainer = document.getElementById('cart-items');
   const modalidad = document.getElementById('checkout-modalidad');
+  const goCheckoutBtn = document.getElementById('go-checkout-btn');
+  const backToCartBtn = document.getElementById('back-to-cart-btn');
+  const receiptModal = document.getElementById('receipt-modal');
+  const receiptCloseBtn = document.getElementById('receipt-close-btn');
 
   cartButton?.addEventListener('click', openCartModal);
   closeButton?.addEventListener('click', closeCartModal);
@@ -214,7 +423,15 @@ function setupCartModalEvents() {
     if (e.target === modal) closeCartModal();
   });
 
+  receiptModal?.addEventListener('click', (e) => {
+    if (e.target === receiptModal) closeReceiptModal();
+  });
+
+  receiptCloseBtn?.addEventListener('click', closeReceiptModal);
+
   itemsContainer?.addEventListener('click', (e) => {
+    if (checkoutStepOpen) return;
+
     const target = e.target;
     if (!(target instanceof HTMLElement)) return;
 
@@ -229,6 +446,27 @@ function setupCartModalEvents() {
 
   modalidad?.addEventListener('change', updateDireccionRequired);
 
+  goCheckoutBtn?.addEventListener('click', () => {
+    checkoutStepOpen = true;
+    toggleCheckoutSection(true);
+    renderCartModal();
+    const whatsappBtn = document.getElementById('whatsapp-order-btn');
+    if (whatsappBtn) {
+      whatsappBtn.style.display = 'none';
+      whatsappBtn.href = '#';
+    }
+    clearFeedback();
+    updateDireccionRequired();
+  });
+
+  backToCartBtn?.addEventListener('click', () => {
+    checkoutStepOpen = false;
+    toggleCheckoutSection(false);
+    clearFeedback();
+    renderCartModal();
+  });
+
+  document.getElementById('download-receipt-btn')?.addEventListener('click', () => downloadReceiptPdf(lastOrderData));
   document.getElementById('checkout-form')?.addEventListener('submit', submitOrder);
 }
 
@@ -247,20 +485,28 @@ async function submitOrder(event) {
     whatsappBtn.href = '#';
   }
 
+  clearFeedback();
+  hideReceipt();
+  closeReceiptModal();
+
   if (!cart.length) {
     showFeedback('El carrito está vacío. Agrega al menos un plato.', 'error');
     return;
   }
 
   const formData = new FormData(form);
+  const normalizedModalidad = normalizeModalidad(formData.get('modalidad'));
+  const total = Number(getCartTotal());
+
   const payload = {
+    id: crypto.randomUUID(),
     nombre_cliente: String(formData.get('nombre') || '').trim(),
     telefono: String(formData.get('telefono') || '').trim(),
-    modalidad: String(formData.get('modalidad') || 'Delivery'),
+    modalidad: normalizedModalidad,
     direccion: String(formData.get('direccion') || '').trim(),
     referencia: String(formData.get('referencia') || '').trim(),
     comentario: String(formData.get('comentario') || '').trim(),
-    total: getCartTotal(),
+    total,
     estado: 'pendiente'
   };
 
@@ -269,25 +515,46 @@ async function submitOrder(event) {
     return;
   }
 
+  const telefonoLimpio = payload.telefono.replace(/\D/g, '');
+  if (!/^\d{9}$/.test(telefonoLimpio)) {
+    showFeedback('El teléfono debe tener exactamente 9 dígitos numéricos.', 'error');
+    return;
+  }
+  payload.telefono = Number(telefonoLimpio);
+
   if (payload.modalidad === 'Delivery' && !payload.direccion) {
     showFeedback('La dirección es obligatoria para pedidos Delivery.', 'error');
     return;
   }
 
+  if (!Number.isFinite(payload.total)) {
+    showFeedback('No se pudo calcular el total. Revisa tu carrito.', 'error');
+    console.error('❌ Total inválido para orders payload:', payload);
+    return;
+  }
+
+  let orderId = null;
+
   try {
     submitBtn.disabled = true;
     submitBtn.textContent = 'Creando pedido...';
 
-    const { data: orderData, error: orderError } = await supabaseClient
+    console.log('📦 Payload orders:', payload);
+
+    const { error: orderError } = await supabaseClient
       .from('orders')
-      .insert(payload)
-      .select('id')
-      .single();
+      .insert(payload);
 
     if (orderError) throw orderError;
 
+    orderId = payload.id;
+
+    if (!orderId) {
+      throw new Error('No se pudo obtener el ID del pedido.');
+    }
+
     const orderItems = cart.map(item => ({
-      order_id: orderData.id,
+      order_id: orderId,
       plato_id: item.id,
       nombre_snapshot: item.nombre,
       precio_snapshot: Number(item.precio),
@@ -295,14 +562,44 @@ async function submitOrder(event) {
       subtotal: Number(item.precio) * Number(item.cantidad)
     }));
 
+    const hasInvalidItem = orderItems.some((item) => {
+      return !Number.isFinite(item.precio_snapshot)
+        || !Number.isFinite(item.cantidad)
+        || !Number.isFinite(item.subtotal);
+    });
+
+    if (hasInvalidItem) {
+      console.error('❌ order_items inválidos:', orderItems);
+      throw new Error('Items con valores numéricos inválidos.');
+    }
+
+    console.log('🧾 Payload order_items:', orderItems);
+
     const { error: itemsError } = await supabaseClient
       .from('order_items')
       .insert(orderItems);
 
-    if (itemsError) throw itemsError;
+    if (itemsError) {
+      const rollbackResponse = await supabaseClient
+        .from('orders')
+        .delete()
+        .eq('id', orderId);
+
+      if (rollbackResponse.error) {
+        console.error('⚠️ Falló rollback lógico (delete order):', {
+          orderId,
+          message: rollbackResponse.error.message,
+          details: rollbackResponse.error.details,
+          hint: rollbackResponse.error.hint,
+          code: rollbackResponse.error.code
+        });
+      }
+
+      throw itemsError;
+    }
 
     lastOrderData = {
-      id: orderData.id,
+      id: orderId,
       ...payload,
       items: orderItems.map(i => ({
         nombre: i.nombre_snapshot,
@@ -312,7 +609,10 @@ async function submitOrder(event) {
       }))
     };
 
-    showFeedback(`✅ Pedido creado (#${getShortOrderId(orderData.id)})`, 'success');
+    showFeedback(`✅ Pedido creado (#${getShortOrderId(orderId)}). Tu comprobante está listo.`, 'success');
+    renderReceipt(lastOrderData);
+    closeCartModal();
+    openReceiptModal();
 
     if (whatsappBtn && lastOrderData) {
       whatsappBtn.href = buildWhatsAppMessage(lastOrderData);
@@ -321,8 +621,16 @@ async function submitOrder(event) {
 
     clearCartAndForm();
   } catch (error) {
-    console.error('❌ Error creando pedido:', error);
-    showFeedback('No se pudo crear el pedido. Intenta nuevamente.', 'error');
+    console.error('❌ Error creando pedido:', {
+      message: error?.message,
+      details: error?.details,
+      hint: error?.hint,
+      code: error?.code,
+      orderId,
+      ordersPayload: payload,
+      cartSnapshot: cart
+    });
+    showFeedback('No se pudo crear el pedido. Revisa tu conexión o intenta de nuevo.', 'error');
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = 'Confirmar pedido';
@@ -393,7 +701,7 @@ async function cargarMenu() {
               precio: item.precio,
               imagen: imageUrl
             });
-            showFeedback(`Agregaste "${item.nombre}" al carrito.`, 'info');
+            showCartToast(`✅ ${item.nombre} agregado al carrito`);
           });
 
           menu.appendChild(div);

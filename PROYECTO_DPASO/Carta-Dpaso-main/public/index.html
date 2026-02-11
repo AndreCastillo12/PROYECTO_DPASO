@@ -42,14 +42,20 @@
       <strong id="cart-total">S/ 0.00</strong>
     </div>
 
-    <form id="checkout-form" class="checkout-form">
-      <h3>Checkout</h3>
+    <button id="go-checkout-btn" class="go-checkout-btn" type="button" style="display:none;">Continuar con tus datos</button>
+
+    <div id="checkout-section" class="checkout-section" style="display:none;">
+      <form id="checkout-form" class="checkout-form">
+        <div class="checkout-header-row">
+          <h3>Completa tus datos</h3>
+          <button id="back-to-cart-btn" class="back-to-cart-btn" type="button">← Volver al carrito</button>
+        </div>
 
       <label for="checkout-nombre">Nombre *</label>
       <input id="checkout-nombre" name="nombre" type="text" required>
 
       <label for="checkout-telefono">Teléfono *</label>
-      <input id="checkout-telefono" name="telefono" type="tel" required>
+      <input id="checkout-telefono" name="telefono" type="tel" inputmode="numeric" pattern="[0-9]{9}" maxlength="9" minlength="9" required>
 
       <label for="checkout-modalidad">Modalidad *</label>
       <select id="checkout-modalidad" name="modalidad" required>
@@ -57,11 +63,17 @@
         <option value="Recojo">Recojo</option>
       </select>
 
-      <label for="checkout-direccion">Dirección <span id="direccion-required">*</span></label>
-      <input id="checkout-direccion" name="direccion" type="text" placeholder="Obligatorio si es Delivery">
+      <div id="direccion-group" class="checkout-conditional-group">
+        <label for="checkout-direccion">Dirección <span id="direccion-required">*</span></label>
+        <input id="checkout-direccion" name="direccion" type="text" placeholder="Obligatorio si es Delivery">
+      </div>
 
-      <label for="checkout-referencia">Referencia</label>
-      <input id="checkout-referencia" name="referencia" type="text">
+      <p id="pickup-location" class="pickup-location" style="display:none;">📍 Recojo en local: Mz WI Lt. 37, Calle 46 San Antonio de Carapongo</p>
+
+      <div id="referencia-group" class="checkout-conditional-group">
+        <label for="checkout-referencia">Referencia</label>
+        <input id="checkout-referencia" name="referencia" type="text">
+      </div>
 
       <label for="checkout-comentario">Comentario</label>
       <textarea id="checkout-comentario" name="comentario" rows="3"></textarea>
@@ -70,9 +82,29 @@
 
       <button id="confirm-order-btn" class="checkout-confirm" type="submit">Confirmar pedido</button>
       <a id="whatsapp-order-btn" class="checkout-whatsapp" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Enviar por WhatsApp</a>
-    </form>
+      </form>
+    </div>
   </div>
 </div>
+
+
+<div id="receipt-modal" class="cart-modal" aria-hidden="true">
+  <div class="cart-modal-content receipt-modal-content">
+    <button id="receipt-close-btn" class="cart-close" type="button" aria-label="Cerrar comprobante">×</button>
+    <h2>✅ Pedido creado con éxito</h2>
+    <p class="receipt-subtitle">Aquí tienes tu comprobante para mostrarlo o compartirlo.</p>
+    <div id="order-receipt" class="order-receipt" style="display:none;">
+      <h4>Comprobante de pedido</h4>
+      <div id="order-receipt-content" class="order-receipt-content"></div>
+    </div>
+    <div class="receipt-actions">
+      <button id="download-receipt-btn" class="receipt-download-btn" type="button">Descargar comprobante (PDF)</button>
+      <a id="receipt-whatsapp-btn" class="checkout-whatsapp" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Enviar por WhatsApp</a>
+    </div>
+  </div>
+</div>
+
+<div id="cart-toast" class="cart-toast" aria-live="polite"></div>
 
 <header class="header">
   <img src="images/Logos/logo.jpg" class="logo" alt="Logo DPASO">
