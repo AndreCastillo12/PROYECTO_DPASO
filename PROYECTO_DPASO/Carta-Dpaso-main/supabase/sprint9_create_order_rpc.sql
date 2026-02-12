@@ -85,6 +85,12 @@ declare
   v_item_subtotal numeric;
   v_items_subtotal_calc numeric := 0;
   v_has_zone boolean := false;
+
+  v_plato_nombre_actual text;
+  v_plato_available boolean;
+  v_plato_track_stock boolean;
+  v_plato_stock integer;
+  v_plato_ref text;
 begin
   if payload is null or pg_catalog.jsonb_typeof(payload) <> 'object' then
     raise exception 'Payload inválido';
@@ -236,8 +242,47 @@ begin
       raise exception 'item.qty debe ser mayor a 0';
     end if;
 
+    select
+      p.nombre,
+      p.is_available,
+      p.track_stock,
+      p.stock
+    into
+      v_plato_nombre_actual,
+      v_plato_available,
+      v_plato_track_stock,
+      v_plato_stock
+    from public.platos p
+    where p.id = v_plato_id
+    for update;
+
+    if not found then
+      raise exception 'NOT_FOUND: %', v_plato_id;
+    end if;
+
+    v_plato_ref := lower(regexp_replace(coalesce(v_plato_nombre_actual, v_plato_id::text), '[^a-zA-Z0-9]+', '_', 'g'));
+
+    if v_plato_available is not true then
+      raise exception 'NOT_AVAILABLE: %', v_plato_ref;
+    end if;
+
+    if v_plato_track_stock is true and coalesce(v_plato_stock, 0) < v_item_qty then
+      raise exception 'OUT_OF_STOCK: %', v_plato_ref;
+    end if;
+
     v_item_subtotal := pg_catalog.round((v_item_price * v_item_qty)::numeric, 2);
     v_items_subtotal_calc := v_items_subtotal_calc + v_item_subtotal;
+
+    if v_plato_track_stock is true then
+      update public.platos
+      set stock = coalesce(stock, 0) - v_item_qty
+      where id = v_plato_id
+        and coalesce(stock, 0) >= v_item_qty;
+
+      if not found then
+        raise exception 'OUT_OF_STOCK: %', v_plato_ref;
+      end if;
+    end if;
 
     insert into public.order_items (
       order_id,

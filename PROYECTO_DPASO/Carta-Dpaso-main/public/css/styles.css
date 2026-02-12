@@ -191,6 +191,23 @@ body {
   background: #163c60;
 }
 
+
+.add-cart-btn:disabled {
+  background: #9aa4af;
+  cursor: not-allowed;
+}
+
+.sold-out-badge {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #b42318;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
 /* ===============================
    FOOTER
 ================================ */

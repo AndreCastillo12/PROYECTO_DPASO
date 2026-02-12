@@ -16,6 +16,7 @@ let storeSettings = null;
 let deliveryZones = [];
 let deliveryZonesLoaded = false;
 let orderSubmitBusy = false;
+let platosState = new Map();
 
 const DEFAULT_STORE_SETTINGS = {
   is_open: true,
@@ -118,6 +119,27 @@ function showCartToast(message) {
   cartToastTimer = setTimeout(() => {
     toast.classList.remove('show');
   }, 1800);
+}
+
+function isPlatoSoldOut(plato) {
+  if (!plato) return true;
+  if (plato.is_available === false) return true;
+  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return true;
+  return false;
+}
+
+function getPlatoAvailabilityMessage(plato) {
+  if (!plato) return 'No disponible';
+  if (plato.is_available === false) return 'No disponible por el momento';
+  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return 'Agotado';
+  return '';
+}
+
+function getUnavailableCartItems() {
+  return cart.filter((item) => {
+    const plato = platosState.get(item.id);
+    return isPlatoSoldOut(plato);
+  });
 }
 
 
@@ -335,13 +357,18 @@ function updateCartTotalsAndAvailability() {
 
   const totals = getCheckoutTotals(modalidad?.value || 'Delivery');
   const storeInfo = getStoreOpenInfo();
+  const unavailableItems = getUnavailableCartItems();
 
   subtotalNode.textContent = formatCurrency(totals.subtotal);
   totalNode.textContent = formatCurrency(totals.totalFinal);
 
   let blockedMessage = '';
 
-  if (!storeInfo.isOpen) {
+  if (unavailableItems.length > 0) {
+    blockedMessage = 'Tienes productos agotados en el carrito.';
+  }
+
+  if (!blockedMessage && !storeInfo.isOpen) {
     blockedMessage = storeInfo.reason || 'Fuera de horario';
     deliveryRow.style.display = 'none';
     if (zoneGroup) zoneGroup.style.display = 'none';
@@ -349,7 +376,7 @@ function updateCartTotalsAndAvailability() {
       zoneFeedback.style.display = 'none';
       zoneFeedback.textContent = '';
     }
-  } else if (totals.modalidad === 'Delivery') {
+  } else if (!blockedMessage && totals.modalidad === 'Delivery') {
     if (zoneGroup) zoneGroup.style.display = 'grid';
 
     if (!totals.hasZonesAvailable) {
@@ -404,6 +431,10 @@ function updateCartTotalsAndAvailability() {
   }
 
   renderStoreStatusBanner();
+
+  if (unavailableItems.length > 0) {
+    showFeedback('Uno o más productos están agotados. Quita esos items para confirmar.', 'error');
+  }
 
 }
 
@@ -580,7 +611,21 @@ function updateCartBadge() {
 }
 
 function addToCart(item) {
+  const platoState = platosState.get(item.id);
+  if (isPlatoSoldOut(platoState)) {
+    showCartToast(`⚠️ ${item.nombre} está agotado`);
+    return;
+  }
+
   const found = cart.find(x => x.id === item.id);
+
+  if (found && platoState?.track_stock === true) {
+    const maxStock = Number(platoState.stock ?? 0);
+    if (found.cantidad >= maxStock) {
+      showCartToast(`⚠️ Solo quedan ${maxStock} de ${item.nombre}`);
+      return;
+    }
+  }
 
   if (found) {
     found.cantidad += 1;
@@ -602,6 +647,15 @@ function addToCart(item) {
 function changeCartQty(itemId, delta) {
   const item = cart.find(x => x.id === itemId);
   if (!item) return;
+
+  const platoState = platosState.get(itemId);
+  if (delta > 0 && platoState?.track_stock === true) {
+    const maxStock = Number(platoState.stock ?? 0);
+    if (item.cantidad >= maxStock) {
+      showCartToast(`⚠️ Stock máximo alcanzado para ${item.nombre}`);
+      return;
+    }
+  }
 
   item.cantidad += delta;
   if (item.cantidad <= 0) {
@@ -681,6 +735,7 @@ function renderCartModal() {
     cart.forEach(item => {
       const row = document.createElement('div');
       row.className = 'cart-item';
+      const availabilityMsg = getPlatoAvailabilityMessage(platosState.get(item.id));
 
       if (checkoutStepOpen) {
         row.innerHTML = `
@@ -689,6 +744,7 @@ function renderCartModal() {
             <h4>${item.nombre}</h4>
             <p>Cantidad: ${item.cantidad}</p>
             <p>Precio: ${formatCurrency(item.precio)}</p>
+            ${availabilityMsg ? `<p style="color:#b42318;font-weight:600;">${availabilityMsg}</p>` : ''}
           </div>
         `;
       } else {
@@ -697,6 +753,7 @@ function renderCartModal() {
           <div class="cart-item-data">
             <h4>${item.nombre}</h4>
             <p>${formatCurrency(item.precio)}</p>
+            ${availabilityMsg ? `<p style="color:#b42318;font-weight:600;">${availabilityMsg}</p>` : ''}
             <div class="cart-item-actions">
               <button type="button" data-action="minus" data-id="${item.id}">-</button>
               <span>${item.cantidad}</span>
@@ -862,6 +919,13 @@ async function submitOrder(event) {
   }
 
   const formData = new FormData(form);
+  const unavailableItems = getUnavailableCartItems();
+  if (unavailableItems.length > 0) {
+    showFeedback('Uno o más productos están agotados. Actualiza tu carrito.', 'error');
+    renderCartModal();
+    return;
+  }
+
   const normalizedModalidad = normalizeModalidad(formData.get('modalidad'));
   const totals = getCheckoutTotals(normalizedModalidad);
 
@@ -1036,7 +1100,13 @@ async function submitOrder(event) {
       orderId,
       payload: getSafeOrderPayloadForLogs(rpcPayload)
     });
-    showFeedback('No se pudo crear el pedido. Revisa tu conexión o intenta de nuevo.', 'error');
+    const errorMessage = String(error?.message || '');
+    if (errorMessage.includes('OUT_OF_STOCK') || errorMessage.includes('NOT_AVAILABLE')) {
+      showFeedback('Uno o más productos están agotados. Actualiza tu carrito.', 'error');
+      await cargarMenu();
+    } else {
+      showFeedback('No se pudo crear el pedido. Revisa tu conexión o intenta de nuevo.', 'error');
+    }
   } finally {
     orderSubmitBusy = false;
     submitBtn.disabled = false;
@@ -1056,7 +1126,7 @@ async function cargarMenu() {
   try {
     const { data: platosData, error: platosError } = await supabaseClient
       .from('platos')
-      .select('*')
+      .select('id,nombre,descripcion,precio,imagen,categoria_id,orden,is_available,track_stock,stock')
       .order('orden', { ascending: true });
 
     if (platosError) throw platosError;
@@ -1067,6 +1137,8 @@ async function cargarMenu() {
       .order('orden', { ascending: true });
 
     if (categoriasError) throw categoriasError;
+
+    platosState = new Map((platosData || []).map((p) => [p.id, p]));
 
     menu.innerHTML = '';
     nav.innerHTML = '';
@@ -1089,6 +1161,8 @@ async function cargarMenu() {
         items.forEach(item => {
           const div = document.createElement('div');
           div.className = 'plato fade-up';
+          const soldOut = isPlatoSoldOut(item);
+          const stockText = soldOut ? '<span class="sold-out-badge">Agotado</span>' : '';
 
           const imageUrl = item.imagen
             ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
@@ -1099,10 +1173,12 @@ async function cargarMenu() {
             <h3>${item.nombre}</h3>
             <p>${item.descripcion || ''}</p>
             <span>${formatCurrency(item.precio)}</span>
-            <button type="button" class="add-cart-btn">Agregar al carrito</button>
+            ${stockText}
+            <button type="button" class="add-cart-btn" ${soldOut ? 'disabled title="Producto agotado"' : ''}>Agregar al carrito</button>
           `;
 
           div.querySelector('.add-cart-btn')?.addEventListener('click', () => {
+            if (soldOut) return;
             addToCart({
               id: item.id,
               nombre: item.nombre,
