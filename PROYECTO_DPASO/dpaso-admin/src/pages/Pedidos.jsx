@@ -195,6 +195,17 @@ export default function Pedidos() {
     return () => clearInterval(intervalId);
   }, [autoRefresh, loadOrderItems, loadOrders, selectedOrder?.id]);
 
+
+  const itemsSubtotal = useMemo(() => {
+    return orderItems.reduce((acc, item) => acc + Number(item.subtotal || 0), 0);
+  }, [orderItems]);
+
+  const deliveryAmount = useMemo(() => {
+    if (!selectedOrder || selectedOrder.modalidad !== "Delivery") return 0;
+    const diff = Number(selectedOrder.total || 0) - itemsSubtotal;
+    return diff > 0 ? diff : 0;
+  }, [itemsSubtotal, selectedOrder]);
+
   const filteredOrders = useMemo(() => {
     const term = search.trim().toLowerCase();
 
@@ -432,6 +443,18 @@ export default function Pedidos() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+                <span>Subtotal items</span>
+                <span>{formatCurrency(itemsSubtotal)}</span>
+              </div>
+
+              {selectedOrder.modalidad === "Delivery" && (
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>Delivery</span>
+                  <span>{formatCurrency(deliveryAmount)}</span>
                 </div>
               )}
 

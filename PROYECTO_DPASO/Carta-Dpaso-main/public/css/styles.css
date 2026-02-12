@@ -467,15 +467,6 @@ footer {
   color: #1f4e79;
 }
 
-.delivery-min-note {
-  margin-top: 8px;
-  font-size: 0.88rem;
-  color: #9f1d1d;
-  background: #fff3f3;
-  border: 1px solid #f1c7c7;
-  border-radius: 8px;
-  padding: 8px 10px;
-}
 
 .cart-total-final {
   border-top: 2px solid #dfe7ef;

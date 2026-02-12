@@ -23,7 +23,6 @@ const EMPTY_FORM = {
   provincia: "",
   distrito: "",
   tarifa: "0",
-  minimo: "0",
   activo: true,
 };
 
@@ -73,7 +72,6 @@ export default function ZonasDelivery() {
     const provincia = normalizeText(form.provincia);
     const distrito = normalizeText(form.distrito);
     const tarifa = Number(form.tarifa);
-    const minimo = Number(form.minimo);
 
     if (!provincia || !distrito) {
       showToast("Provincia y distrito son obligatorios", "error");
@@ -90,16 +88,11 @@ export default function ZonasDelivery() {
       return null;
     }
 
-    if (!Number.isFinite(minimo) || minimo < 0) {
-      showToast("El mínimo debe ser >= 0", "error");
-      return null;
-    }
-
     return {
       provincia,
       distrito,
       tarifa,
-      minimo,
+      minimo: 0,
       activo: Boolean(form.activo),
     };
   }
@@ -151,7 +144,6 @@ export default function ZonasDelivery() {
       provincia: zone.provincia || "",
       distrito: zone.distrito || "",
       tarifa: String(zone.tarifa ?? 0),
-      minimo: String(zone.minimo ?? 0),
       activo: Boolean(zone.activo),
     });
   }
@@ -232,11 +224,6 @@ export default function ZonasDelivery() {
             <span>Tarifa (S/)</span>
             <input type="number" min="0" step="0.01" value={form.tarifa} onChange={(e) => setForm((p) => ({ ...p, tarifa: e.target.value }))} style={inputStyle} />
           </label>
-
-          <label style={fieldWrap}>
-            <span>Mínimo (S/)</span>
-            <input type="number" min="0" step="0.01" value={form.minimo} onChange={(e) => setForm((p) => ({ ...p, minimo: e.target.value }))} style={inputStyle} />
-          </label>
         </div>
 
         <label style={switchRow}>
@@ -262,7 +249,6 @@ export default function ZonasDelivery() {
                   <th style={thStyle}>Provincia</th>
                   <th style={thStyle}>Distrito</th>
                   <th style={thStyle}>Tarifa</th>
-                  <th style={thStyle}>Mínimo</th>
                   <th style={thStyle}>Activo</th>
                   <th style={thStyle}>Acciones</th>
                 </tr>
@@ -273,7 +259,6 @@ export default function ZonasDelivery() {
                     <td style={tdStyle}>{zone.provincia}</td>
                     <td style={tdStyle}>{zone.distrito}</td>
                     <td style={tdStyle}>S/ {Number(zone.tarifa || 0).toFixed(2)}</td>
-                    <td style={tdStyle}>S/ {Number(zone.minimo || 0).toFixed(2)}</td>
                     <td style={tdStyle}>{zone.activo ? "Sí" : "No"}</td>
                     <td style={tdStyle}>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

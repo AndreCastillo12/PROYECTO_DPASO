@@ -278,13 +278,11 @@ function getCheckoutTotals(modalidad) {
   const selected = getSelectedZone();
   const zona = selected?.zona || null;
   const deliveryFee = normalizedModalidad === 'Delivery' ? Number(zona?.tarifa || 0) : 0;
-  const minDelivery = normalizedModalidad === 'Delivery' ? Number(zona?.minimo || 0) : 0;
   const totalFinal = subtotal + deliveryFee;
 
   return {
     subtotal,
     deliveryFee,
-    minDelivery,
     totalFinal,
     modalidad: normalizedModalidad,
     provincia: selected?.provincia || '',
@@ -315,13 +313,12 @@ function updateCartTotalsAndAvailability() {
   const deliveryRow = document.getElementById('cart-delivery-row');
   const deliveryFeeNode = document.getElementById('cart-delivery-fee');
   const totalNode = document.getElementById('cart-total');
-  const minNote = document.getElementById('delivery-min-note');
   const modalidad = document.getElementById('checkout-modalidad');
   const confirmBtn = document.getElementById('confirm-order-btn');
   const zoneGroup = document.getElementById('delivery-zone-group');
   const zoneFeedback = document.getElementById('delivery-zone-feedback');
 
-  if (!subtotalNode || !deliveryRow || !deliveryFeeNode || !totalNode || !minNote) return;
+  if (!subtotalNode || !deliveryRow || !deliveryFeeNode || !totalNode) return;
 
   const totals = getCheckoutTotals(modalidad?.value || 'Delivery');
   const storeInfo = getStoreOpenInfo();
@@ -334,7 +331,6 @@ function updateCartTotalsAndAvailability() {
   if (!storeInfo.isOpen) {
     blockedMessage = storeInfo.reason || 'Fuera de horario';
     deliveryRow.style.display = 'none';
-    minNote.style.display = 'none';
     if (zoneGroup) zoneGroup.style.display = 'none';
     if (zoneFeedback) {
       zoneFeedback.style.display = 'none';
@@ -346,7 +342,6 @@ function updateCartTotalsAndAvailability() {
     if (!totals.hasZonesAvailable) {
       blockedMessage = 'Delivery no disponible por ahora. Selecciona Recojo.';
       deliveryRow.style.display = 'none';
-      minNote.style.display = 'none';
       if (zoneFeedback) {
         zoneFeedback.style.display = 'block';
         zoneFeedback.textContent = 'Delivery no disponible por ahora.';
@@ -354,7 +349,6 @@ function updateCartTotalsAndAvailability() {
     } else if (!totals.hasZoneSelected) {
       blockedMessage = 'Selecciona provincia y distrito para delivery.';
       deliveryRow.style.display = 'none';
-      minNote.style.display = 'none';
       if (zoneFeedback) {
         zoneFeedback.style.display = 'block';
         zoneFeedback.textContent = 'Selecciona provincia y distrito.';
@@ -362,7 +356,6 @@ function updateCartTotalsAndAvailability() {
     } else if (!totals.hasCoverage) {
       blockedMessage = 'No hay cobertura para la zona seleccionada.';
       deliveryRow.style.display = 'none';
-      minNote.style.display = 'none';
       if (zoneFeedback) {
         zoneFeedback.style.display = 'block';
         zoneFeedback.textContent = 'No hay cobertura para esta zona.';
@@ -370,10 +363,6 @@ function updateCartTotalsAndAvailability() {
     } else {
       deliveryRow.style.display = 'flex';
       deliveryFeeNode.textContent = formatCurrency(totals.deliveryFee);
-      minNote.style.display = 'block';
-      minNote.textContent = totals.subtotal < totals.minDelivery
-        ? `❗ Mínimo para delivery en tu zona: ${formatCurrency(totals.minDelivery)}`
-        : `Mínimo para delivery en tu zona: ${formatCurrency(totals.minDelivery)}`;
 
       if (zoneFeedback) {
         zoneFeedback.style.display = 'block';
@@ -384,14 +373,9 @@ function updateCartTotalsAndAvailability() {
       showFeedback('No hay cobertura para la zona seleccionada.', 'error');
       return;
     }
-
-    if (totals.subtotal < totals.minDelivery) {
-        blockedMessage = `Mínimo para delivery en tu zona: ${formatCurrency(totals.minDelivery)}`;
-      }
     }
   } else {
     deliveryRow.style.display = 'none';
-    minNote.style.display = 'none';
     if (zoneGroup) zoneGroup.style.display = 'none';
     if (zoneFeedback) {
       zoneFeedback.style.display = 'none';
@@ -408,9 +392,6 @@ function updateCartTotalsAndAvailability() {
 
   renderStoreStatusBanner();
 
-  if (blockedMessage && checkoutStepOpen) {
-    showFeedback(blockedMessage, 'error');
-  }
 }
 
 function buildWhatsAppMessage(orderData) {
@@ -923,11 +904,6 @@ async function submitOrder(event) {
 
     if (!totals.hasCoverage) {
       showFeedback('No hay cobertura para la zona seleccionada.', 'error');
-      return;
-    }
-
-    if (totals.subtotal < totals.minDelivery) {
-      showFeedback(`Mínimo para delivery en tu zona: ${formatCurrency(totals.minDelivery)}`, 'error');
       return;
     }
   }
