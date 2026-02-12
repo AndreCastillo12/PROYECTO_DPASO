@@ -109,7 +109,7 @@ export default function AdminLayout() {
           <NavLink to="/platos" style={linkStyle}>Gestión de Platos</NavLink>
           <NavLink to="/categorias" style={linkStyle}>Gestión de Categorías</NavLink>
           <NavLink to="/pedidos" style={linkStyle}>Pedidos</NavLink>
-          <NavLink to="/tienda" style={linkStyle}>Tienda</NavLink>
+          <NavLink to="/tienda" style={linkStyle}>Horarios de atención</NavLink>
           <NavLink to="/zonas-delivery" style={linkStyle}>Zonas delivery</NavLink>
           <NavLink to="/perfil" style={linkStyle}>Perfil</NavLink>
         </div>
@@ -173,7 +173,7 @@ export default function AdminLayout() {
               Pedidos
             </NavLink>
             <NavLink to="/tienda" style={linkStyle} onClick={() => setMenuOpen(false)}>
-              Tienda
+              Horarios de atención
             </NavLink>
             <NavLink to="/zonas-delivery" style={linkStyle} onClick={() => setMenuOpen(false)}>
               Zonas delivery

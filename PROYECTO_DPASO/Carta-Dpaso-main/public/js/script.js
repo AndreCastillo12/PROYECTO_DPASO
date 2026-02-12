@@ -21,10 +21,31 @@ const DEFAULT_STORE_SETTINGS = {
   open_time: null,
   close_time: null,
   closed_message: 'Estamos cerrados. Vuelve en nuestro horario de atención.',
-  timezone: 'America/Lima',
-  delivery_fee: 0,
-  min_order_delivery: 0
+  timezone: 'America/Lima'
 };
+
+const DELIVERY_ZONE_CATALOG = [
+  { provincia: 'Lima', distrito: 'Ate' },
+  { provincia: 'Lima', distrito: 'Santa Anita' },
+  { provincia: 'Lima', distrito: 'El Agustino' },
+  { provincia: 'Lima', distrito: 'San Juan de Lurigancho' },
+  { provincia: 'Lima', distrito: 'La Molina' },
+  { provincia: 'Lima', distrito: 'San Luis' },
+  { provincia: 'Lima', distrito: 'Cercado de Lima' },
+  { provincia: 'Lima', distrito: 'Chosica' },
+  { provincia: 'Lima', distrito: 'Chaclacayo' },
+  { provincia: 'Callao', distrito: 'Callao' },
+  { provincia: 'Callao', distrito: 'Bellavista' },
+  { provincia: 'Callao', distrito: 'La Perla' },
+  { provincia: 'Callao', distrito: 'La Punta' },
+  { provincia: 'Callao', distrito: 'Carmen de la Legua' },
+  { provincia: 'Huaral', distrito: 'Huaral' },
+  { provincia: 'Huaral', distrito: 'Chancay' },
+  { provincia: 'Cañete', distrito: 'San Vicente de Cañete' },
+  { provincia: 'Cañete', distrito: 'Asia' },
+  { provincia: 'Huaura', distrito: 'Huacho' },
+  { provincia: 'Huaura', distrito: 'Vegueta' }
+];
 
 function normalizeModalidad(rawValue) {
   const value = String(rawValue || '').trim().toLowerCase();
@@ -161,19 +182,23 @@ async function getDeliveryZones() {
   updateCartTotalsAndAvailability();
 }
 
-function getUniqueProvincias() {
-  return [...new Set(deliveryZones.map((z) => z.provincia))];
+function getUniqueDistricts() {
+  return [...new Set(DELIVERY_ZONE_CATALOG.map((z) => z.distrito))];
 }
 
-function getDistrictsByProvincia(provincia) {
-  return deliveryZones.filter((z) => z.provincia === provincia);
+function getProvinciasByDistrito(distrito) {
+  return DELIVERY_ZONE_CATALOG
+    .filter((z) => z.distrito === distrito)
+    .map((z) => z.provincia);
 }
 
 function getSelectedZone() {
+
   const provincia = document.getElementById('checkout-provincia')?.value || '';
   const distrito = document.getElementById('checkout-distrito')?.value || '';
-  if (!provincia || !distrito) return null;
-  return deliveryZones.find((z) => z.provincia === provincia && z.distrito === distrito) || null;
+  if (!provincia || !distrito) return { zona: null, provincia, distrito };
+  const zona = deliveryZones.find((z) => z.provincia === provincia && z.distrito === distrito) || null;
+  return { zona, provincia, distrito };
 }
 
 function renderDeliveryZoneOptions() {
@@ -181,10 +206,23 @@ function renderDeliveryZoneOptions() {
   const distritoSelect = document.getElementById('checkout-distrito');
   if (!provinciaSelect || !distritoSelect) return;
 
-  const currentProvincia = provinciaSelect.value;
   const currentDistrito = distritoSelect.value;
+  const currentProvincia = provinciaSelect.value;
 
-  const provincias = getUniqueProvincias();
+  const districts = getUniqueDistricts();
+  distritoSelect.innerHTML = '<option value="">Selecciona distrito</option>';
+  districts.forEach((dist) => {
+    const option = document.createElement('option');
+    option.value = dist;
+    option.textContent = dist;
+    distritoSelect.appendChild(option);
+  });
+
+  if (districts.includes(currentDistrito)) {
+    distritoSelect.value = currentDistrito;
+  }
+
+  const provincias = getProvinciasByDistrito(distritoSelect.value);
   provinciaSelect.innerHTML = '<option value="">Selecciona provincia</option>';
   provincias.forEach((prov) => {
     const option = document.createElement('option');
@@ -195,19 +233,6 @@ function renderDeliveryZoneOptions() {
 
   if (provincias.includes(currentProvincia)) {
     provinciaSelect.value = currentProvincia;
-  }
-
-  const districts = getDistrictsByProvincia(provinciaSelect.value);
-  distritoSelect.innerHTML = '<option value="">Selecciona distrito</option>';
-  districts.forEach((zone) => {
-    const option = document.createElement('option');
-    option.value = zone.distrito;
-    option.textContent = zone.distrito;
-    distritoSelect.appendChild(option);
-  });
-
-  if (districts.some((d) => d.distrito === currentDistrito)) {
-    distritoSelect.value = currentDistrito;
   }
 }
 
@@ -265,9 +290,10 @@ function getStoreOpenInfo() {
 function getCheckoutTotals(modalidad) {
   const normalizedModalidad = normalizeModalidad(modalidad || 'Delivery');
   const subtotal = Number(getCartTotal());
-  const zone = getSelectedZone();
-  const deliveryFee = normalizedModalidad === 'Delivery' ? Number(zone?.tarifa || 0) : 0;
-  const minDelivery = normalizedModalidad === 'Delivery' ? Number(zone?.minimo || 0) : 0;
+  const selected = getSelectedZone();
+  const zona = selected?.zona || null;
+  const deliveryFee = normalizedModalidad === 'Delivery' ? Number(zona?.tarifa || 0) : 0;
+  const minDelivery = normalizedModalidad === 'Delivery' ? Number(zona?.minimo || 0) : 0;
   const totalFinal = subtotal + deliveryFee;
 
   return {
@@ -276,10 +302,11 @@ function getCheckoutTotals(modalidad) {
     minDelivery,
     totalFinal,
     modalidad: normalizedModalidad,
-    provincia: zone?.provincia || '',
-    distrito: zone?.distrito || '',
-    hasZoneSelected: Boolean(zone),
-    hasZonesAvailable: deliveryZonesLoaded && deliveryZones.length > 0
+    provincia: selected?.provincia || '',
+    distrito: selected?.distrito || '',
+    hasZoneSelected: Boolean(selected?.provincia && selected?.distrito),
+    hasCoverage: Boolean(zona),
+    hasZonesAvailable: DELIVERY_ZONE_CATALOG.length > 0
   };
 }
 
@@ -340,12 +367,20 @@ function updateCartTotalsAndAvailability() {
         zoneFeedback.textContent = 'Delivery no disponible por ahora.';
       }
     } else if (!totals.hasZoneSelected) {
-      blockedMessage = 'Selecciona provincia y distrito para delivery.';
+      blockedMessage = 'Selecciona distrito y provincia para delivery.';
       deliveryRow.style.display = 'none';
       minNote.style.display = 'none';
       if (zoneFeedback) {
         zoneFeedback.style.display = 'block';
-        zoneFeedback.textContent = 'Selecciona provincia y distrito.';
+        zoneFeedback.textContent = 'Selecciona distrito y provincia.';
+      }
+    } else if (!totals.hasCoverage) {
+      blockedMessage = 'No hay cobertura para la zona seleccionada.';
+      deliveryRow.style.display = 'none';
+      minNote.style.display = 'none';
+      if (zoneFeedback) {
+        zoneFeedback.style.display = 'block';
+        zoneFeedback.textContent = 'No hay cobertura para esta zona.';
       }
     } else {
       deliveryRow.style.display = 'flex';
@@ -360,7 +395,12 @@ function updateCartTotalsAndAvailability() {
         zoneFeedback.textContent = `Zona: ${totals.provincia} - ${totals.distrito}`;
       }
 
-      if (totals.subtotal < totals.minDelivery) {
+      if (!totals.hasCoverage) {
+      showFeedback('No hay cobertura para la zona seleccionada.', 'error');
+      return;
+    }
+
+    if (totals.subtotal < totals.minDelivery) {
         blockedMessage = `Mínimo para delivery en tu zona: ${formatCurrency(totals.minDelivery)}`;
       }
     }
@@ -775,22 +815,21 @@ function setupCartModalEvents() {
   const provincia = document.getElementById('checkout-provincia');
   const distrito = document.getElementById('checkout-distrito');
 
-  provincia?.addEventListener('change', () => {
-    const selectedProvincia = provincia.value;
-    const districts = getDistrictsByProvincia(selectedProvincia);
-    if (distrito) {
-      distrito.innerHTML = '<option value="">Selecciona distrito</option>';
-      districts.forEach((zone) => {
+  distrito?.addEventListener('change', () => {
+    const provincias = getProvinciasByDistrito(distrito.value);
+    if (provincia) {
+      provincia.innerHTML = '<option value="">Selecciona provincia</option>';
+      provincias.forEach((prov) => {
         const option = document.createElement('option');
-        option.value = zone.distrito;
-        option.textContent = zone.distrito;
-        distrito.appendChild(option);
+        option.value = prov;
+        option.textContent = prov;
+        provincia.appendChild(option);
       });
     }
     updateCartTotalsAndAvailability();
   });
 
-  distrito?.addEventListener('change', updateCartTotalsAndAvailability);
+  provincia?.addEventListener('change', updateCartTotalsAndAvailability);
 
 
   goCheckoutBtn?.addEventListener('click', () => {
@@ -893,7 +932,12 @@ async function submitOrder(event) {
     }
 
     if (!totals.hasZoneSelected) {
-      showFeedback('Selecciona provincia y distrito para delivery.', 'error');
+      showFeedback('Selecciona distrito y provincia para delivery.', 'error');
+      return;
+    }
+
+    if (!totals.hasCoverage) {
+      showFeedback('No hay cobertura para la zona seleccionada.', 'error');
       return;
     }
 
