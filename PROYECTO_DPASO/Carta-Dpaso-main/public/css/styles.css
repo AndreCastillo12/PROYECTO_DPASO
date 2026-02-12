@@ -455,6 +455,12 @@ footer {
   padding: 9px 10px;
 }
 
+.delivery-zone-department {
+  margin: 0;
+  font-size: 0.84rem;
+  color: #4b5563;
+}
+
 .delivery-zone-feedback {
   margin-top: 2px;
   font-size: 0.84rem;

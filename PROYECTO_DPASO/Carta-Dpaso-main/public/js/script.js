@@ -24,28 +24,20 @@ const DEFAULT_STORE_SETTINGS = {
   timezone: 'America/Lima'
 };
 
-const DELIVERY_ZONE_CATALOG = [
-  { provincia: 'Lima', distrito: 'Ate' },
-  { provincia: 'Lima', distrito: 'Santa Anita' },
-  { provincia: 'Lima', distrito: 'El Agustino' },
-  { provincia: 'Lima', distrito: 'San Juan de Lurigancho' },
-  { provincia: 'Lima', distrito: 'La Molina' },
-  { provincia: 'Lima', distrito: 'San Luis' },
-  { provincia: 'Lima', distrito: 'Cercado de Lima' },
-  { provincia: 'Lima', distrito: 'Chosica' },
-  { provincia: 'Lima', distrito: 'Chaclacayo' },
-  { provincia: 'Callao', distrito: 'Callao' },
-  { provincia: 'Callao', distrito: 'Bellavista' },
-  { provincia: 'Callao', distrito: 'La Perla' },
-  { provincia: 'Callao', distrito: 'La Punta' },
-  { provincia: 'Callao', distrito: 'Carmen de la Legua' },
-  { provincia: 'Huaral', distrito: 'Huaral' },
-  { provincia: 'Huaral', distrito: 'Chancay' },
-  { provincia: 'Cañete', distrito: 'San Vicente de Cañete' },
-  { provincia: 'Cañete', distrito: 'Asia' },
-  { provincia: 'Huaura', distrito: 'Huacho' },
-  { provincia: 'Huaura', distrito: 'Vegueta' }
-];
+const DELIVERY_ZONES_LIMA = {
+  'Barranca': ['Barranca', 'Paramonga', 'Pativilca', 'Supe', 'Supe Puerto'],
+  'Cajatambo': ['Cajatambo', 'Copa', 'Gorgor', 'Huancapon', 'Manas'],
+  'Canta': ['Canta', 'Arahuay', 'Huamantanga', 'Huaros', 'Lachaqui', 'San Buenaventura', 'Santa Rosa de Quives'],
+  'Cañete': ['San Vicente de Cañete', 'Asia', 'Calango', 'Cerro Azul', 'Chilca', 'Coayllo', 'Imperial', 'Lunahuaná', 'Mala', 'Nuevo Imperial', 'Pacarán', 'Quilmaná', 'San Antonio', 'San Luis', 'Santa Cruz de Flores', 'Zúñiga'],
+  'Huaral': ['Huaral', 'Atavillos Alto', 'Atavillos Bajo', 'Aucallama', 'Chancay', 'Ihuari', 'Lampián', 'Pacaraos', 'San Miguel de Acos', 'Santa Cruz de Andamarca', 'Sumbilca', 'Veintisiete de Noviembre'],
+  'Huarochirí': ['Matucana', 'Antioquia', 'Callahuanca', 'Carampoma', 'Chicla', 'Cuenca', 'Huachupampa', 'Huanza', 'Huarochirí', 'Lahuaytambo', 'Langa', 'Laraos', 'Mariatana', 'Ricardo Palma', 'San Andrés de Tupicocha', 'San Antonio', 'San Bartolomé', 'San Damián', 'San Juan de Iris', 'San Juan de Tantaranche', 'San Lorenzo de Quinti', 'San Mateo', 'San Mateo de Otao', 'San Pedro de Casta', 'San Pedro de Huancayre', 'Sangallaya', 'Santa Cruz de Cocachacra', 'Santa Eulalia', 'Santiago de Anchucaya', 'Santiago de Tuna', 'Santo Domingo de los Olleros', 'Surco'],
+  'Huaura': ['Huacho', 'Ámbar', 'Caleta de Carquín', 'Checras', 'Hualmay', 'Huaura', 'Leoncio Prado', 'Paccho', 'Santa Leonor', 'Santa María', 'Sayán', 'Végueta'],
+  'Lima': ['Lima', 'Ancón', 'Ate', 'Barranco', 'Breña', 'Carabayllo', 'Chaclacayo', 'Chorrillos', 'Cieneguilla', 'Comas', 'El Agustino', 'Independencia', 'Jesús María', 'La Molina', 'La Victoria', 'Lince', 'Los Olivos', 'Lurigancho', 'Lurín', 'Magdalena del Mar', 'Miraflores', 'Pachacámac', 'Pucusana', 'Pueblo Libre', 'Puente Piedra', 'Punta Hermosa', 'Punta Negra', 'Rímac', 'San Bartolo', 'San Borja', 'San Isidro', 'San Juan de Lurigancho', 'San Juan de Miraflores', 'San Luis', 'San Martín de Porres', 'San Miguel', 'Santa Anita', 'Santa María del Mar', 'Santa Rosa', 'Santiago de Surco', 'Surquillo', 'Villa El Salvador', 'Villa María del Triunfo'],
+  'Oyón': ['Oyón', 'Andajes', 'Caujul', 'Cochamarca', 'Naván', 'Pachangara'],
+  'Yauyos': ['Yauyos', 'Alis', 'Ayauca', 'Ayavirí', 'Azángaro', 'Cacra', 'Carania', 'Catahuasi', 'Chocos', 'Cochas', 'Colonia', 'Hongos', 'Huampará', 'Huancaya', 'Huangáscar', 'Huantán', 'Huañec', 'Laraos', 'Lincha', 'Madeán', 'Miraflores', 'Omas', 'Putinza', 'Quinches', 'Quinocay', 'San Joaquín', 'San Pedro de Pilas', 'Tanta', 'Tauripampa', 'Tomás', 'Tupe', 'Viñac', 'Vitis']
+};
+
+const PROVINCIAS_LIMA = Object.keys(DELIVERY_ZONES_LIMA).sort((a, b) => a.localeCompare(b));
 
 function normalizeModalidad(rawValue) {
   const value = String(rawValue || '').trim().toLowerCase();
@@ -182,14 +174,8 @@ async function getDeliveryZones() {
   updateCartTotalsAndAvailability();
 }
 
-function getUniqueDistricts() {
-  return [...new Set(DELIVERY_ZONE_CATALOG.map((z) => z.distrito))];
-}
-
-function getProvinciasByDistrito(distrito) {
-  return DELIVERY_ZONE_CATALOG
-    .filter((z) => z.distrito === distrito)
-    .map((z) => z.provincia);
+function getDistrictsByProvincia(provincia) {
+  return DELIVERY_ZONES_LIMA[provincia] || [];
 }
 
 function getSelectedZone() {
@@ -206,10 +192,22 @@ function renderDeliveryZoneOptions() {
   const distritoSelect = document.getElementById('checkout-distrito');
   if (!provinciaSelect || !distritoSelect) return;
 
-  const currentDistrito = distritoSelect.value;
   const currentProvincia = provinciaSelect.value;
+  const currentDistrito = distritoSelect.value;
 
-  const districts = getUniqueDistricts();
+  provinciaSelect.innerHTML = '<option value="">Selecciona provincia</option>';
+  PROVINCIAS_LIMA.forEach((prov) => {
+    const option = document.createElement('option');
+    option.value = prov;
+    option.textContent = prov;
+    provinciaSelect.appendChild(option);
+  });
+
+  if (PROVINCIAS_LIMA.includes(currentProvincia)) {
+    provinciaSelect.value = currentProvincia;
+  }
+
+  const districts = getDistrictsByProvincia(provinciaSelect.value);
   distritoSelect.innerHTML = '<option value="">Selecciona distrito</option>';
   districts.forEach((dist) => {
     const option = document.createElement('option');
@@ -220,19 +218,6 @@ function renderDeliveryZoneOptions() {
 
   if (districts.includes(currentDistrito)) {
     distritoSelect.value = currentDistrito;
-  }
-
-  const provincias = getProvinciasByDistrito(distritoSelect.value);
-  provinciaSelect.innerHTML = '<option value="">Selecciona provincia</option>';
-  provincias.forEach((prov) => {
-    const option = document.createElement('option');
-    option.value = prov;
-    option.textContent = prov;
-    provinciaSelect.appendChild(option);
-  });
-
-  if (provincias.includes(currentProvincia)) {
-    provinciaSelect.value = currentProvincia;
   }
 }
 
@@ -306,7 +291,7 @@ function getCheckoutTotals(modalidad) {
     distrito: selected?.distrito || '',
     hasZoneSelected: Boolean(selected?.provincia && selected?.distrito),
     hasCoverage: Boolean(zona),
-    hasZonesAvailable: DELIVERY_ZONE_CATALOG.length > 0
+    hasZonesAvailable: PROVINCIAS_LIMA.length > 0
   };
 }
 
@@ -367,12 +352,12 @@ function updateCartTotalsAndAvailability() {
         zoneFeedback.textContent = 'Delivery no disponible por ahora.';
       }
     } else if (!totals.hasZoneSelected) {
-      blockedMessage = 'Selecciona distrito y provincia para delivery.';
+      blockedMessage = 'Selecciona provincia y distrito para delivery.';
       deliveryRow.style.display = 'none';
       minNote.style.display = 'none';
       if (zoneFeedback) {
         zoneFeedback.style.display = 'block';
-        zoneFeedback.textContent = 'Selecciona distrito y provincia.';
+        zoneFeedback.textContent = 'Selecciona provincia y distrito.';
       }
     } else if (!totals.hasCoverage) {
       blockedMessage = 'No hay cobertura para la zona seleccionada.';
@@ -815,21 +800,21 @@ function setupCartModalEvents() {
   const provincia = document.getElementById('checkout-provincia');
   const distrito = document.getElementById('checkout-distrito');
 
-  distrito?.addEventListener('change', () => {
-    const provincias = getProvinciasByDistrito(distrito.value);
-    if (provincia) {
-      provincia.innerHTML = '<option value="">Selecciona provincia</option>';
-      provincias.forEach((prov) => {
+  provincia?.addEventListener('change', () => {
+    const districts = getDistrictsByProvincia(provincia.value);
+    if (distrito) {
+      distrito.innerHTML = '<option value="">Selecciona distrito</option>';
+      districts.forEach((dist) => {
         const option = document.createElement('option');
-        option.value = prov;
-        option.textContent = prov;
-        provincia.appendChild(option);
+        option.value = dist;
+        option.textContent = dist;
+        distrito.appendChild(option);
       });
     }
     updateCartTotalsAndAvailability();
   });
 
-  provincia?.addEventListener('change', updateCartTotalsAndAvailability);
+  distrito?.addEventListener('change', updateCartTotalsAndAvailability);
 
 
   goCheckoutBtn?.addEventListener('click', () => {
@@ -932,7 +917,7 @@ async function submitOrder(event) {
     }
 
     if (!totals.hasZoneSelected) {
-      showFeedback('Selecciona distrito y provincia para delivery.', 'error');
+      showFeedback('Selecciona provincia y distrito para delivery.', 'error');
       return;
     }
 

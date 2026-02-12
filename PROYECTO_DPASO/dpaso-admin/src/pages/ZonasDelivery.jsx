@@ -3,28 +3,20 @@ import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 
-const ZONE_CATALOG = [
-  { provincia: "Lima", distrito: "Ate" },
-  { provincia: "Lima", distrito: "Santa Anita" },
-  { provincia: "Lima", distrito: "El Agustino" },
-  { provincia: "Lima", distrito: "San Juan de Lurigancho" },
-  { provincia: "Lima", distrito: "La Molina" },
-  { provincia: "Lima", distrito: "San Luis" },
-  { provincia: "Lima", distrito: "Cercado de Lima" },
-  { provincia: "Lima", distrito: "Chosica" },
-  { provincia: "Lima", distrito: "Chaclacayo" },
-  { provincia: "Callao", distrito: "Callao" },
-  { provincia: "Callao", distrito: "Bellavista" },
-  { provincia: "Callao", distrito: "La Perla" },
-  { provincia: "Callao", distrito: "La Punta" },
-  { provincia: "Callao", distrito: "Carmen de la Legua" },
-  { provincia: "Huaral", distrito: "Huaral" },
-  { provincia: "Huaral", distrito: "Chancay" },
-  { provincia: "Cañete", distrito: "San Vicente de Cañete" },
-  { provincia: "Cañete", distrito: "Asia" },
-  { provincia: "Huaura", distrito: "Huacho" },
-  { provincia: "Huaura", distrito: "Vegueta" },
-];
+const LIMA_PROVINCES_DISTRICTS = {
+  Barranca: ["Barranca", "Paramonga", "Pativilca", "Supe", "Supe Puerto"],
+  Cajatambo: ["Cajatambo", "Copa", "Gorgor", "Huancapon", "Manas"],
+  Canta: ["Canta", "Arahuay", "Huamantanga", "Huaros", "Lachaqui", "San Buenaventura", "Santa Rosa de Quives"],
+  "Cañete": ["San Vicente de Cañete", "Asia", "Calango", "Cerro Azul", "Chilca", "Coayllo", "Imperial", "Lunahuaná", "Mala", "Nuevo Imperial", "Pacarán", "Quilmaná", "San Antonio", "San Luis", "Santa Cruz de Flores", "Zúñiga"],
+  Huaral: ["Huaral", "Atavillos Alto", "Atavillos Bajo", "Aucallama", "Chancay", "Ihuari", "Lampián", "Pacaraos", "San Miguel de Acos", "Santa Cruz de Andamarca", "Sumbilca", "Veintisiete de Noviembre"],
+  "Huarochirí": ["Matucana", "Antioquia", "Callahuanca", "Carampoma", "Chicla", "Cuenca", "Huachupampa", "Huanza", "Huarochirí", "Lahuaytambo", "Langa", "Laraos", "Mariatana", "Ricardo Palma", "San Andrés de Tupicocha", "San Antonio", "San Bartolomé", "San Damián", "San Juan de Iris", "San Juan de Tantaranche", "San Lorenzo de Quinti", "San Mateo", "San Mateo de Otao", "San Pedro de Casta", "San Pedro de Huancayre", "Sangallaya", "Santa Cruz de Cocachacra", "Santa Eulalia", "Santiago de Anchucaya", "Santiago de Tuna", "Santo Domingo de los Olleros", "Surco"],
+  Huaura: ["Huacho", "Ámbar", "Caleta de Carquín", "Checras", "Hualmay", "Huaura", "Leoncio Prado", "Paccho", "Santa Leonor", "Santa María", "Sayán", "Végueta"],
+  Lima: ["Lima", "Ancón", "Ate", "Barranco", "Breña", "Carabayllo", "Chaclacayo", "Chorrillos", "Cieneguilla", "Comas", "El Agustino", "Independencia", "Jesús María", "La Molina", "La Victoria", "Lince", "Los Olivos", "Lurigancho", "Lurín", "Magdalena del Mar", "Miraflores", "Pachacámac", "Pucusana", "Pueblo Libre", "Puente Piedra", "Punta Hermosa", "Punta Negra", "Rímac", "San Bartolo", "San Borja", "San Isidro", "San Juan de Lurigancho", "San Juan de Miraflores", "San Luis", "San Martín de Porres", "San Miguel", "Santa Anita", "Santa María del Mar", "Santa Rosa", "Santiago de Surco", "Surquillo", "Villa El Salvador", "Villa María del Triunfo"],
+  "Oyón": ["Oyón", "Andajes", "Caujul", "Cochamarca", "Naván", "Pachangara"],
+  Yauyos: ["Yauyos", "Alis", "Ayauca", "Ayavirí", "Azángaro", "Cacra", "Carania", "Catahuasi", "Chocos", "Cochas", "Colonia", "Hongos", "Huampará", "Huancaya", "Huangáscar", "Huantán", "Huañec", "Laraos", "Lincha", "Madeán", "Miraflores", "Omas", "Putinza", "Quinches", "Quinocay", "San Joaquín", "San Pedro de Pilas", "Tanta", "Tauripampa", "Tomás", "Tupe", "Viñac", "Vitis"],
+};
+
+const PROVINCIAS_LIMA = Object.keys(LIMA_PROVINCES_DISTRICTS).sort((a, b) => a.localeCompare(b));
 
 const EMPTY_FORM = {
   id: null,
@@ -46,17 +38,9 @@ export default function ZonasDelivery() {
   const [saving, setSaving] = useState(false);
   const { toast, showToast } = useToast(2400);
 
-  const districts = useMemo(
-    () => [...new Set(ZONE_CATALOG.map((z) => z.distrito))].sort((a, b) => a.localeCompare(b)),
-    []
-  );
-
-  const provincesByDistrict = useMemo(() => {
-    return ZONE_CATALOG
-      .filter((z) => z.distrito === form.distrito)
-      .map((z) => z.provincia)
-      .sort((a, b) => a.localeCompare(b));
-  }, [form.distrito]);
+  const distritosByProvincia = useMemo(() => {
+    return (LIMA_PROVINCES_DISTRICTS[form.provincia] || []).slice().sort((a, b) => a.localeCompare(b));
+  }, [form.provincia]);
 
   useEffect(() => {
     loadZones();
@@ -67,8 +51,8 @@ export default function ZonasDelivery() {
     const { data, error } = await supabase
       .from("delivery_zones")
       .select("*")
-      .order("distrito", { ascending: true })
-      .order("provincia", { ascending: true });
+      .order("provincia", { ascending: true })
+      .order("distrito", { ascending: true });
 
     if (error) {
       console.error("Error cargando delivery_zones:", error);
@@ -91,13 +75,13 @@ export default function ZonasDelivery() {
     const tarifa = Number(form.tarifa);
     const minimo = Number(form.minimo);
 
-    if (!distrito || !provincia) {
-      showToast("Distrito y provincia son obligatorios", "error");
+    if (!provincia || !distrito) {
+      showToast("Provincia y distrito son obligatorios", "error");
       return null;
     }
 
-    if (!ZONE_CATALOG.some((z) => z.distrito === distrito && z.provincia === provincia)) {
-      showToast("La combinación distrito/provincia no es válida", "error");
+    if (!(LIMA_PROVINCES_DISTRICTS[provincia] || []).includes(distrito)) {
+      showToast("El distrito no pertenece a la provincia seleccionada", "error");
       return null;
     }
 
@@ -211,31 +195,33 @@ export default function ZonasDelivery() {
       <h2 style={{ margin: 0 }}>Zonas delivery</h2>
 
       <div style={cardStyle}>
+        <p style={{ margin: 0, color: "#4b5563", fontSize: 13 }}>Departamento: Lima</p>
+
         <div style={grid2}>
           <label style={fieldWrap}>
-            <span>Distrito</span>
+            <span>Provincia</span>
             <select
-              value={form.distrito}
-              onChange={(e) => setForm((p) => ({ ...p, distrito: e.target.value, provincia: "" }))}
+              value={form.provincia}
+              onChange={(e) => setForm((p) => ({ ...p, provincia: e.target.value, distrito: "" }))}
               style={inputStyle}
             >
-              <option value="">Selecciona distrito</option>
-              {districts.map((d) => (
-                <option key={d} value={d}>{d}</option>
+              <option value="">Selecciona provincia</option>
+              {PROVINCIAS_LIMA.map((prov) => (
+                <option key={prov} value={prov}>{prov}</option>
               ))}
             </select>
           </label>
 
           <label style={fieldWrap}>
-            <span>Provincia</span>
+            <span>Distrito</span>
             <select
-              value={form.provincia}
-              onChange={(e) => setForm((p) => ({ ...p, provincia: e.target.value }))}
+              value={form.distrito}
+              onChange={(e) => setForm((p) => ({ ...p, distrito: e.target.value }))}
               style={inputStyle}
             >
-              <option value="">Selecciona provincia</option>
-              {provincesByDistrict.map((p) => (
-                <option key={p} value={p}>{p}</option>
+              <option value="">Selecciona distrito</option>
+              {distritosByProvincia.map((dist) => (
+                <option key={dist} value={dist}>{dist}</option>
               ))}
             </select>
           </label>
@@ -273,8 +259,8 @@ export default function ZonasDelivery() {
             <table style={tableStyle}>
               <thead>
                 <tr>
-                  <th style={thStyle}>Distrito</th>
                   <th style={thStyle}>Provincia</th>
+                  <th style={thStyle}>Distrito</th>
                   <th style={thStyle}>Tarifa</th>
                   <th style={thStyle}>Mínimo</th>
                   <th style={thStyle}>Activo</th>
@@ -284,8 +270,8 @@ export default function ZonasDelivery() {
               <tbody>
                 {zones.map((zone) => (
                   <tr key={zone.id}>
-                    <td style={tdStyle}>{zone.distrito}</td>
                     <td style={tdStyle}>{zone.provincia}</td>
+                    <td style={tdStyle}>{zone.distrito}</td>
                     <td style={tdStyle}>S/ {Number(zone.tarifa || 0).toFixed(2)}</td>
                     <td style={tdStyle}>S/ {Number(zone.minimo || 0).toFixed(2)}</td>
                     <td style={tdStyle}>{zone.activo ? "Sí" : "No"}</td>
