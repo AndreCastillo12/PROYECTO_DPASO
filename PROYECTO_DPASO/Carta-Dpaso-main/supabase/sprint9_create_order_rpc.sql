@@ -15,6 +15,11 @@ alter table if exists public.orders
 alter table if exists public.orders
   alter column estado set default 'pending';
 
+alter table if exists public.orders
+  add column if not exists short_code text;
+
+create unique index if not exists orders_short_code_uidx on public.orders(short_code);
+
 do $$
 begin
   if not exists (
@@ -85,6 +90,12 @@ declare
   v_item_subtotal numeric;
   v_items_subtotal_calc numeric := 0;
   v_has_zone boolean := false;
+
+  v_plato_nombre_actual text;
+  v_plato_available boolean;
+  v_plato_track_stock boolean;
+  v_plato_stock integer;
+  v_plato_ref text;
 begin
   if payload is null or pg_catalog.jsonb_typeof(payload) <> 'object' then
     raise exception 'Payload inválido';
@@ -189,7 +200,8 @@ begin
     delivery_fee,
     total,
     provincia,
-    distrito
+    distrito,
+    short_code
   ) values (
     v_name,
     v_phone,
@@ -201,7 +213,8 @@ begin
     pg_catalog.round(v_delivery_fee, 2),
     pg_catalog.round(v_total, 2),
     v_provincia,
-    v_distrito
+    v_distrito,
+    null
   )
   returning id, created_at into v_order_id, v_created_at;
 
@@ -236,8 +249,47 @@ begin
       raise exception 'item.qty debe ser mayor a 0';
     end if;
 
+    select
+      p.nombre,
+      p.is_available,
+      p.track_stock,
+      p.stock
+    into
+      v_plato_nombre_actual,
+      v_plato_available,
+      v_plato_track_stock,
+      v_plato_stock
+    from public.platos p
+    where p.id = v_plato_id
+    for update;
+
+    if not found then
+      raise exception 'NOT_FOUND: %', v_plato_id;
+    end if;
+
+    v_plato_ref := lower(regexp_replace(coalesce(v_plato_nombre_actual, v_plato_id::text), '[^a-zA-Z0-9]+', '_', 'g'));
+
+    if v_plato_available is not true then
+      raise exception 'NOT_AVAILABLE: %', v_plato_ref;
+    end if;
+
+    if v_plato_track_stock is true and coalesce(v_plato_stock, 0) < v_item_qty then
+      raise exception 'OUT_OF_STOCK: %', v_plato_ref;
+    end if;
+
     v_item_subtotal := pg_catalog.round((v_item_price * v_item_qty)::numeric, 2);
     v_items_subtotal_calc := v_items_subtotal_calc + v_item_subtotal;
+
+    if v_plato_track_stock is true then
+      update public.platos
+      set stock = coalesce(stock, 0) - v_item_qty
+      where id = v_plato_id
+        and coalesce(stock, 0) >= v_item_qty;
+
+      if not found then
+        raise exception 'OUT_OF_STOCK: %', v_plato_ref;
+      end if;
+    end if;
 
     insert into public.order_items (
       order_id,
@@ -260,11 +312,16 @@ begin
     raise exception 'subtotal no coincide con la suma de items';
   end if;
 
-  v_short_id := pg_catalog.substring(pg_catalog.replace(v_order_id::text, '-', ''), 1, 8);
+  v_short_id := pg_catalog.upper(pg_catalog.substring(pg_catalog.replace(v_order_id::text, '-', ''), 1, 8));
+
+  update public.orders
+  set short_code = v_short_id
+  where id = v_order_id;
 
   return pg_catalog.jsonb_build_object(
     'order_id', v_order_id,
     'short_id', v_short_id,
+    'short_code', v_short_id,
     'created_at', v_created_at
   );
 end;
