@@ -24,6 +24,10 @@ function shortOrderId(id = "") {
   return String(id).slice(-8).toUpperCase();
 }
 
+function getClientCode(order) {
+  return String(order?.short_code || '').trim().toUpperCase();
+}
+
 function formatDate(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
@@ -216,7 +220,9 @@ export default function Pedidos() {
 
       const customerName = String(order.nombre_cliente || "").toLowerCase();
       const customerPhone = String(order.telefono || "").toLowerCase();
-      return customerName.includes(term) || customerPhone.includes(term);
+      const clientCode = getClientCode(order).toLowerCase();
+      const internalCode = shortOrderId(order.id).toLowerCase();
+      return customerName.includes(term) || customerPhone.includes(term) || clientCode.includes(term) || internalCode.includes(term);
     });
   }, [orders, search, statusFilter]);
 
@@ -263,9 +269,11 @@ export default function Pedidos() {
       return;
     }
 
+    const publicCode = getClientCode(selectedOrder) || shortOrderId(selectedOrder.id);
+
     const message = [
       `Hola ${selectedOrder.nombre_cliente || "cliente"},`,
-      `tu pedido #${shortOrderId(selectedOrder.id)} está ${humanStatus(selectedOrder.estado).toLowerCase()}.`,
+      `tu pedido ${publicCode} está ${humanStatus(selectedOrder.estado).toLowerCase()}.`,
       `Total ${formatCurrency(selectedOrder.total)}.`,
       "¡Gracias por comprar en DPASO!",
     ].join(" ");
@@ -304,7 +312,7 @@ export default function Pedidos() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ ...inputStyle, minWidth: 220 }}
-          placeholder="Buscar por cliente o teléfono"
+          placeholder="Buscar por cliente, teléfono, código cliente o ID interno"
         />
 
         <label style={toggleLabel}>
@@ -335,7 +343,8 @@ export default function Pedidos() {
               <table style={tableStyle}>
                 <thead>
                   <tr>
-                    <th style={thStyle}>Pedido</th>
+                    <th style={thStyle}>Código cliente</th>
+                    <th style={thStyle}>ID interno</th>
                     <th style={thStyle}>Fecha</th>
                     <th style={thStyle}>Cliente</th>
                     <th style={thStyle}>Teléfono</th>
@@ -353,6 +362,7 @@ export default function Pedidos() {
                         onClick={() => setSelectedOrder(order)}
                         style={{ ...trStyle, ...(isSelected ? trSelectedStyle : {}) }}
                       >
+                        <td style={tdStyle}><strong>{getClientCode(order) || "-"}</strong></td>
                         <td style={tdStyle}>#{shortOrderId(order.id)}</td>
                         <td style={tdStyle}>{formatDate(order.created_at)}</td>
                         <td style={tdStyle}>{order.nombre_cliente || "-"}</td>
@@ -377,12 +387,14 @@ export default function Pedidos() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <h3 style={{ margin: 0 }}>Pedido #{shortOrderId(selectedOrder.id)}</h3>
+                <h3 style={{ margin: 0 }}>Pedido {getClientCode(selectedOrder) || `#${shortOrderId(selectedOrder.id)}`}</h3>
                 <span style={{ ...badgeStyle, ...getStatusStyle(selectedOrder.estado) }}>
                   {humanStatus(selectedOrder.estado)}
                 </span>
               </div>
 
+              <p style={labelLine}><strong>Código cliente:</strong> {getClientCode(selectedOrder) || "-"}</p>
+              <p style={labelLine}><strong>ID interno:</strong> #{shortOrderId(selectedOrder.id)}</p>
               <p style={labelLine}><strong>Fecha:</strong> {formatDate(selectedOrder.created_at)}</p>
               <p style={labelLine}><strong>Cliente:</strong> {selectedOrder.nombre_cliente || "-"}</p>
               <p style={labelLine}><strong>Teléfono:</strong> {selectedOrder.telefono || "-"}</p>
@@ -532,7 +544,7 @@ const inputStyle = {
 const tableStyle = {
   width: "100%",
   borderCollapse: "collapse",
-  minWidth: 760,
+  minWidth: 920,
 };
 
 const thStyle = {

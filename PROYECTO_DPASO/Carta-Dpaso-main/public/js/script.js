@@ -6,6 +6,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const CART_STORAGE_KEY = 'dpaso_cart_v1';
+const TRACKING_LAST_CODE_STORAGE_KEY = 'dpaso_last_tracking_code';
 const WA_PHONE = '51941552878';
 
 let cart = [];
@@ -16,6 +17,12 @@ let storeSettings = null;
 let deliveryZones = [];
 let deliveryZonesLoaded = false;
 let orderSubmitBusy = false;
+let platosState = new Map();
+let lastOrderCode = '';
+let trackingIntervalId = null;
+let trackingLastCode = '';
+
+const STATUS_ORDER = ['pending', 'accepted', 'preparing', 'ready', 'dispatched', 'delivered', 'completed', 'cancelled'];
 
 const DEFAULT_STORE_SETTINGS = {
   is_open: true,
@@ -54,8 +61,20 @@ function formatCurrency(value) {
   return `S/ ${Number(value).toFixed(2)}`;
 }
 
+function getCartItemAvailability(item) {
+  const plato = platosState.get(item.id);
+  return !isPlatoSoldOut(plato);
+}
+
 function getCartTotal() {
-  return cart.reduce((acc, item) => acc + (Number(item.precio) * Number(item.cantidad)), 0);
+  return cart.reduce((acc, item) => {
+    if (!getCartItemAvailability(item)) return acc;
+    return acc + (Number(item.precio) * Number(item.cantidad));
+  }, 0);
+}
+
+function getUnavailableCartItemsCount() {
+  return getUnavailableCartItems().reduce((acc, item) => acc + Number(item.cantidad || 0), 0);
 }
 
 function getCartCount() {
@@ -118,6 +137,265 @@ function showCartToast(message) {
   cartToastTimer = setTimeout(() => {
     toast.classList.remove('show');
   }, 1800);
+}
+
+function isPlatoSoldOut(plato) {
+  if (!plato) return true;
+  if (plato.is_available === false) return true;
+  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return true;
+  return false;
+}
+
+function getPlatoAvailabilityMessage(plato) {
+  if (!plato) return 'No disponible';
+  if (plato.is_available === false) return 'No disponible por el momento';
+  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return 'Agotado';
+  return '';
+}
+
+function getUnavailableCartItems() {
+  return cart.filter((item) => {
+    const plato = platosState.get(item.id);
+    return isPlatoSoldOut(plato);
+  });
+}
+
+
+function formatTrackingDate(dateIso) {
+  if (!dateIso) return '-';
+  const date = new Date(dateIso);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('es-PE');
+}
+
+function normalizeTrackingCode(rawCode = '') {
+  return String(rawCode).trim().toUpperCase();
+}
+
+
+function saveLastTrackingCode(code = '') {
+  const normalized = normalizeTrackingCode(code);
+  if (!normalized) return;
+  localStorage.setItem(TRACKING_LAST_CODE_STORAGE_KEY, normalized);
+}
+
+function getLastTrackingCode() {
+  return normalizeTrackingCode(localStorage.getItem(TRACKING_LAST_CODE_STORAGE_KEY) || '');
+}
+
+function refreshTrackingLastButton() {
+  const lastBtn = document.getElementById('trackingLastBtn');
+  if (!lastBtn) return;
+  const lastCode = getLastTrackingCode();
+  lastBtn.style.display = lastCode ? 'inline-flex' : 'none';
+}
+
+function humanTrackingStatus(status) {
+  const map = {
+    pending: 'Pendiente',
+    accepted: 'Aceptado',
+    preparing: 'Preparando',
+    ready: 'Listo',
+    dispatched: 'En camino',
+    delivered: 'Entregado',
+    completed: 'Completado',
+    cancelled: 'Cancelado'
+  };
+  return map[status] || status || '-';
+}
+
+function stopTrackingAutoRefresh() {
+  if (trackingIntervalId) {
+    clearInterval(trackingIntervalId);
+    trackingIntervalId = null;
+  }
+}
+
+function startTrackingAutoRefresh() {
+  stopTrackingAutoRefresh();
+  if (!trackingLastCode) return;
+
+  trackingIntervalId = setInterval(() => {
+    const modal = document.getElementById('trackingModal');
+    if (!modal || !modal.classList.contains('open')) {
+      stopTrackingAutoRefresh();
+      return;
+    }
+    fetchOrderStatus(trackingLastCode, { silent: true });
+  }, 25000);
+}
+
+function openTrackingModal(prefillCode = '') {
+  const modal = document.getElementById('trackingModal');
+  const input = document.getElementById('trackingCode');
+  if (!modal || !input) return;
+
+  const codeToUse = normalizeTrackingCode(prefillCode) || getLastTrackingCode();
+
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  if (codeToUse) input.value = codeToUse;
+  input.focus();
+  refreshTrackingLastButton();
+
+  if (codeToUse && prefillCode) {
+    fetchOrderStatus(codeToUse);
+  }
+}
+
+function closeTrackingModal() {
+  const modal = document.getElementById('trackingModal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  stopTrackingAutoRefresh();
+}
+
+function renderTrackingError(message) {
+  const result = document.getElementById('trackingResult');
+  const refreshBtn = document.getElementById('trackingRefreshBtn');
+  if (!result) return;
+
+  result.innerHTML = `<p class="tracking-error">${message}</p>`;
+  if (refreshBtn) refreshBtn.disabled = true;
+  stopTrackingAutoRefresh();
+}
+
+function buildTrackingTimeline(status) {
+  if (status === 'cancelled') {
+    return `<div class="tracking-timeline">
+      <div class="tracking-step cancelled">
+        <span class="tracking-step-dot"></span>
+        <span>Pedido cancelado</span>
+      </div>
+    </div>`;
+  }
+
+  const idx = STATUS_ORDER.indexOf(status);
+  const safeIndex = idx === -1 ? 0 : idx;
+
+  const steps = STATUS_ORDER.filter((s) => s !== 'cancelled').map((step, index) => {
+    const cls = index < safeIndex ? 'completed' : (index === safeIndex ? 'active' : '');
+    return `<div class="tracking-step ${cls}">
+      <span class="tracking-step-dot"></span>
+      <span>${humanTrackingStatus(step)}</span>
+    </div>`;
+  }).join('');
+
+  return `<div class="tracking-timeline">${steps}</div>`;
+}
+
+function renderTracking(data) {
+  const result = document.getElementById('trackingResult');
+  const refreshBtn = document.getElementById('trackingRefreshBtn');
+  if (!result || !data) return;
+
+  result.innerHTML = `
+    <div class="tracking-order-meta">
+      <p><strong>Código:</strong> ${data.short_code}</p>
+      <p><strong>Estado:</strong> ${humanTrackingStatus(data.status)}</p>
+      <p><strong>Modalidad:</strong> ${data.modalidad || '-'}</p>
+      <p><strong>Total:</strong> ${formatCurrency(data.total || 0)}</p>
+      <p><strong>Creado:</strong> ${formatTrackingDate(data.created_at)}</p>
+      <p><strong>Actualizado:</strong> ${formatTrackingDate(data.updated_at)}</p>
+    </div>
+    ${buildTrackingTimeline(data.status)}
+  `;
+
+  if (refreshBtn) refreshBtn.disabled = false;
+}
+
+async function fetchOrderStatus(code, options = {}) {
+  const normalizedCode = normalizeTrackingCode(code);
+  const result = document.getElementById('trackingResult');
+  const refreshBtn = document.getElementById('trackingRefreshBtn');
+
+  if (!normalizedCode) {
+    renderTrackingError('Ingresa un código válido para rastrear tu pedido.');
+    return;
+  }
+
+  if (!options.silent && result) {
+    result.innerHTML = '<p>Consultando estado...</p>';
+  }
+
+  try {
+    const { data, error } = await supabaseClient.rpc('get_order_status', { short_code: normalizedCode });
+    if (error) throw error;
+
+    trackingLastCode = normalizedCode;
+    saveLastTrackingCode(normalizedCode);
+    refreshTrackingLastButton();
+    renderTracking(data);
+    if (refreshBtn) refreshBtn.disabled = false;
+    startTrackingAutoRefresh();
+  } catch (error) {
+    const errMsg = String(error?.message || '');
+    if (errMsg.includes('INVALID_CODE')) {
+      renderTrackingError('Código inválido. Verifica e inténtalo nuevamente.');
+    } else if (errMsg.includes('NOT_FOUND')) {
+      renderTrackingError('No encontramos ese pedido. Revisa tu código.');
+    } else {
+      renderTrackingError('No se pudo consultar el estado del pedido. Intenta de nuevo.');
+    }
+  }
+}
+
+function setupTrackingEvents() {
+  const openBtn = document.getElementById('btnTracking');
+  const floatBtn = document.getElementById('tracking-float-btn');
+  const closeBtn = document.getElementById('trackingCloseBtn');
+  const searchBtn = document.getElementById('trackingSearchBtn');
+  const refreshBtn = document.getElementById('trackingRefreshBtn');
+  const lastBtn = document.getElementById('trackingLastBtn');
+  const input = document.getElementById('trackingCode');
+  const modal = document.getElementById('trackingModal');
+
+  openBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    openTrackingModal();
+  });
+
+  floatBtn?.addEventListener('click', () => {
+    openTrackingModal();
+  });
+
+  closeBtn?.addEventListener('click', closeTrackingModal);
+
+  searchBtn?.addEventListener('click', () => {
+    fetchOrderStatus(input?.value || '');
+  });
+
+  refreshBtn?.addEventListener('click', () => {
+    if (!trackingLastCode) return;
+    fetchOrderStatus(trackingLastCode);
+  });
+
+  lastBtn?.addEventListener('click', () => {
+    const lastCode = getLastTrackingCode();
+    if (!lastCode) return;
+    if (input) input.value = lastCode;
+    fetchOrderStatus(lastCode);
+  });
+
+  input?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      fetchOrderStatus(input.value);
+    }
+  });
+
+  modal?.addEventListener('click', (event) => {
+    if (event.target === modal) closeTrackingModal();
+  });
+
+  refreshTrackingLastButton();
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && modal?.classList.contains('open')) {
+      closeTrackingModal();
+    }
+  });
 }
 
 
@@ -330,18 +608,24 @@ function updateCartTotalsAndAvailability() {
   const confirmBtn = document.getElementById('confirm-order-btn');
   const zoneGroup = document.getElementById('delivery-zone-group');
   const zoneFeedback = document.getElementById('delivery-zone-feedback');
+  const availabilityNote = document.getElementById('cart-availability-note');
 
   if (!subtotalNode || !deliveryRow || !deliveryFeeNode || !totalNode) return;
 
   const totals = getCheckoutTotals(modalidad?.value || 'Delivery');
   const storeInfo = getStoreOpenInfo();
+  const unavailableItems = getUnavailableCartItems();
 
   subtotalNode.textContent = formatCurrency(totals.subtotal);
   totalNode.textContent = formatCurrency(totals.totalFinal);
 
   let blockedMessage = '';
 
-  if (!storeInfo.isOpen) {
+  if (unavailableItems.length > 0) {
+    blockedMessage = 'Tienes productos agotados en el carrito.';
+  }
+
+  if (!blockedMessage && !storeInfo.isOpen) {
     blockedMessage = storeInfo.reason || 'Fuera de horario';
     deliveryRow.style.display = 'none';
     if (zoneGroup) zoneGroup.style.display = 'none';
@@ -349,7 +633,7 @@ function updateCartTotalsAndAvailability() {
       zoneFeedback.style.display = 'none';
       zoneFeedback.textContent = '';
     }
-  } else if (totals.modalidad === 'Delivery') {
+  } else if (!blockedMessage && totals.modalidad === 'Delivery') {
     if (zoneGroup) zoneGroup.style.display = 'grid';
 
     if (!totals.hasZonesAvailable) {
@@ -398,12 +682,31 @@ function updateCartTotalsAndAvailability() {
 
   if (confirmBtn) {
     confirmBtn.disabled = Boolean(blockedMessage);
-    confirmBtn.textContent = blockedMessage
-      ? (storeInfo.isOpen ? 'Completa delivery' : 'Fuera de horario')
-      : 'Confirmar pedido';
+    if (!blockedMessage) {
+      confirmBtn.textContent = 'Confirmar pedido';
+    } else if (unavailableItems.length > 0) {
+      confirmBtn.textContent = 'Corrige productos';
+    } else {
+      confirmBtn.textContent = storeInfo.isOpen ? 'Completa delivery' : 'Fuera de horario';
+    }
   }
 
   renderStoreStatusBanner();
+
+  const unavailableCount = getUnavailableCartItemsCount();
+  if (availabilityNote) {
+    if (unavailableCount > 0) {
+      availabilityNote.style.display = 'block';
+      availabilityNote.textContent = `${unavailableCount} item(s) no disponible(s) no se incluyen en el total.`;
+    } else {
+      availabilityNote.style.display = 'none';
+      availabilityNote.textContent = '';
+    }
+  }
+
+  if (unavailableItems.length > 0) {
+    showFeedback('Algunos productos ya no están disponibles, elimínalos del carrito.', 'error');
+  }
 
 }
 
@@ -453,13 +756,16 @@ function renderReceipt(orderData) {
   const receiptBox = document.getElementById('order-receipt');
   const receiptContent = document.getElementById('order-receipt-content');
   const receiptWhatsAppBtn = document.getElementById('receipt-whatsapp-btn');
+  const receiptTrackBtn = document.getElementById('btnVerEstadoPedido');
   if (!receiptBox || !receiptContent || !orderData) return;
 
   const shortId = orderData.short_id || getShortOrderId(orderData.id);
+  const trackingCode = orderData.short_code || shortId;
   const lines = orderData.items.map((it) => `${it.nombre} · Cantidad: ${it.cantidad} · Precio: ${formatCurrency(it.precio)}`);
 
   receiptContent.innerHTML = `
     <p><strong>Pedido:</strong> #${shortId}</p>
+    <p><strong>Código de rastreo:</strong> ${trackingCode}</p>
     <p><strong>Cliente:</strong> ${orderData.nombre_cliente}</p>
     <p><strong>Teléfono:</strong> ${orderData.telefono}</p>
     <p><strong>Modalidad:</strong> ${orderData.modalidad}</p>
@@ -470,6 +776,10 @@ function renderReceipt(orderData) {
     <p><strong>Items:</strong></p>
     ${lines.map((line) => `<p>• ${line}</p>`).join('')}
   `;
+
+  if (receiptTrackBtn) {
+    receiptTrackBtn.style.display = 'inline-flex';
+  }
 
   if (receiptWhatsAppBtn) {
     receiptWhatsAppBtn.href = buildWhatsAppMessage(orderData);
@@ -483,9 +793,11 @@ function hideReceipt() {
   const receiptBox = document.getElementById('order-receipt');
   const receiptContent = document.getElementById('order-receipt-content');
   const receiptWhatsAppBtn = document.getElementById('receipt-whatsapp-btn');
+  const receiptTrackBtn = document.getElementById('btnVerEstadoPedido');
 
   if (receiptBox) receiptBox.style.display = 'none';
   if (receiptContent) receiptContent.innerHTML = '';
+  if (receiptTrackBtn) receiptTrackBtn.style.display = 'none';
   if (receiptWhatsAppBtn) {
     receiptWhatsAppBtn.style.display = 'none';
     receiptWhatsAppBtn.href = '#';
@@ -579,8 +891,50 @@ function updateCartBadge() {
   badge.textContent = getCartCount();
 }
 
+async function refreshCartAvailability() {
+  const ids = [...new Set(cart.map((item) => item.id).filter(Boolean))];
+  if (!ids.length) return;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('platos')
+      .select('id,is_available,track_stock,stock,precio')
+      .in('id', ids);
+
+    if (error) throw error;
+
+    (data || []).forEach((row) => {
+      const prev = platosState.get(row.id) || {};
+      platosState.set(row.id, { ...prev, ...row });
+    });
+
+    cart = cart.map((item) => {
+      const latest = (data || []).find((row) => row.id === item.id);
+      if (!latest) return item;
+      return { ...item, precio: Number(latest.precio ?? item.precio) };
+    });
+    saveCart();
+  } catch (error) {
+    console.warn('⚠️ No se pudo refrescar disponibilidad del carrito:', error?.message || error);
+  }
+}
+
 function addToCart(item) {
+  const platoState = platosState.get(item.id);
+  if (isPlatoSoldOut(platoState)) {
+    showCartToast(`⚠️ ${item.nombre} está agotado`);
+    return;
+  }
+
   const found = cart.find(x => x.id === item.id);
+
+  if (found && platoState?.track_stock === true) {
+    const maxStock = Number(platoState.stock ?? 0);
+    if (found.cantidad >= maxStock) {
+      showCartToast(`⚠️ Solo quedan ${maxStock} de ${item.nombre}`);
+      return;
+    }
+  }
 
   if (found) {
     found.cantidad += 1;
@@ -602,6 +956,20 @@ function addToCart(item) {
 function changeCartQty(itemId, delta) {
   const item = cart.find(x => x.id === itemId);
   if (!item) return;
+
+  const platoState = platosState.get(itemId);
+  if (delta > 0 && isPlatoSoldOut(platoState)) {
+    showCartToast(`⚠️ ${item.nombre} no está disponible`);
+    return;
+  }
+
+  if (delta > 0 && platoState?.track_stock === true) {
+    const maxStock = Number(platoState.stock ?? 0);
+    if (item.cantidad >= maxStock) {
+      showCartToast(`⚠️ Stock máximo alcanzado para ${item.nombre}`);
+      return;
+    }
+  }
 
   item.cantidad += delta;
   if (item.cantidad <= 0) {
@@ -648,6 +1016,7 @@ function openCartModal() {
   modal.setAttribute('aria-hidden', 'false');
   getStoreSettings();
   getDeliveryZones();
+  refreshCartAvailability().then(() => renderCartModal());
 }
 
 function closeCartModal() {
@@ -681,6 +1050,9 @@ function renderCartModal() {
     cart.forEach(item => {
       const row = document.createElement('div');
       row.className = 'cart-item';
+      const platoInfo = platosState.get(item.id);
+      const isUnavailable = isPlatoSoldOut(platoInfo);
+      const availabilityMsg = getPlatoAvailabilityMessage(platoInfo);
 
       if (checkoutStepOpen) {
         row.innerHTML = `
@@ -689,6 +1061,7 @@ function renderCartModal() {
             <h4>${item.nombre}</h4>
             <p>Cantidad: ${item.cantidad}</p>
             <p>Precio: ${formatCurrency(item.precio)}</p>
+            ${availabilityMsg ? `<p style="color:#b42318;font-weight:600;">${availabilityMsg}</p>` : ''}
           </div>
         `;
       } else {
@@ -697,10 +1070,11 @@ function renderCartModal() {
           <div class="cart-item-data">
             <h4>${item.nombre}</h4>
             <p>${formatCurrency(item.precio)}</p>
+            ${availabilityMsg ? `<p style="color:#b42318;font-weight:600;">${availabilityMsg}</p>` : ''}
             <div class="cart-item-actions">
               <button type="button" data-action="minus" data-id="${item.id}">-</button>
               <span>${item.cantidad}</span>
-              <button type="button" data-action="plus" data-id="${item.id}">+</button>
+              <button type="button" data-action="plus" data-id="${item.id}" ${isUnavailable ? 'disabled title="Producto no disponible"' : ''}>+</button>
               <button type="button" data-action="delete" data-id="${item.id}" class="danger">Eliminar</button>
             </div>
           </div>
@@ -760,6 +1134,7 @@ function setupCartModalEvents() {
   const backToCartBtn = document.getElementById('back-to-cart-btn');
   const receiptModal = document.getElementById('receipt-modal');
   const receiptCloseBtn = document.getElementById('receipt-close-btn');
+  const trackOrderBtn = document.getElementById('btnVerEstadoPedido');
 
   cartButton?.addEventListener('click', openCartModal);
   closeButton?.addEventListener('click', closeCartModal);
@@ -773,6 +1148,11 @@ function setupCartModalEvents() {
   });
 
   receiptCloseBtn?.addEventListener('click', closeReceiptModal);
+  trackOrderBtn?.addEventListener('click', () => {
+    const code = lastOrderCode || lastOrderData?.short_id || '';
+    closeReceiptModal();
+    openTrackingModal(code);
+  });
 
   itemsContainer?.addEventListener('click', (e) => {
     if (checkoutStepOpen) return;
@@ -861,7 +1241,16 @@ async function submitOrder(event) {
     return;
   }
 
+  await refreshCartAvailability();
+
   const formData = new FormData(form);
+  const unavailableItems = getUnavailableCartItems();
+  if (unavailableItems.length > 0) {
+    showFeedback('Algunos productos ya no están disponibles, elimínalos del carrito.', 'error');
+    renderCartModal();
+    return;
+  }
+
   const normalizedModalidad = normalizeModalidad(formData.get('modalidad'));
   const totals = getCheckoutTotals(normalizedModalidad);
 
@@ -973,6 +1362,7 @@ async function submitOrder(event) {
 
   let orderId = null;
   let shortId = '';
+  let shortCode = '';
   let createdAt = null;
 
   try {
@@ -989,6 +1379,7 @@ async function submitOrder(event) {
 
     orderId = rpcData?.order_id || null;
     shortId = String(rpcData?.short_id || '');
+    shortCode = String(rpcData?.short_code || shortId || '');
     createdAt = rpcData?.created_at || null;
 
     if (!orderId) throw new Error('No se pudo obtener order_id desde create_order.');
@@ -996,6 +1387,7 @@ async function submitOrder(event) {
     lastOrderData = {
       id: orderId,
       short_id: shortId || getShortOrderId(orderId),
+      short_code: shortCode || shortId || getShortOrderId(orderId),
       nombre_cliente: customerName,
       telefono: telefonoLimpio,
       modalidad: normalizedModalidad,
@@ -1015,6 +1407,9 @@ async function submitOrder(event) {
         subtotal: i.subtotal
       }))
     };
+
+    lastOrderCode = lastOrderData.short_code || lastOrderData.short_id;
+    saveLastTrackingCode(lastOrderCode);
 
     showFeedback(`✅ Pedido creado (#${lastOrderData.short_id}). Tu comprobante está listo.`, 'success');
     renderReceipt(lastOrderData);
@@ -1036,7 +1431,13 @@ async function submitOrder(event) {
       orderId,
       payload: getSafeOrderPayloadForLogs(rpcPayload)
     });
-    showFeedback('No se pudo crear el pedido. Revisa tu conexión o intenta de nuevo.', 'error');
+    const errorMessage = String(error?.message || '');
+    if (errorMessage.includes('OUT_OF_STOCK') || errorMessage.includes('NOT_AVAILABLE')) {
+      showFeedback('Algunos productos ya no están disponibles, elimínalos del carrito.', 'error');
+      await cargarMenu();
+    } else {
+      showFeedback('No se pudo crear el pedido. Revisa tu conexión o intenta de nuevo.', 'error');
+    }
   } finally {
     orderSubmitBusy = false;
     submitBtn.disabled = false;
@@ -1056,7 +1457,7 @@ async function cargarMenu() {
   try {
     const { data: platosData, error: platosError } = await supabaseClient
       .from('platos')
-      .select('*')
+      .select('id,nombre,descripcion,precio,imagen,categoria_id,orden,is_available,track_stock,stock')
       .order('orden', { ascending: true });
 
     if (platosError) throw platosError;
@@ -1067,6 +1468,8 @@ async function cargarMenu() {
       .order('orden', { ascending: true });
 
     if (categoriasError) throw categoriasError;
+
+    platosState = new Map((platosData || []).map((p) => [p.id, p]));
 
     menu.innerHTML = '';
     nav.innerHTML = '';
@@ -1089,6 +1492,8 @@ async function cargarMenu() {
         items.forEach(item => {
           const div = document.createElement('div');
           div.className = 'plato fade-up';
+          const soldOut = isPlatoSoldOut(item);
+          const stockText = soldOut ? '<span class="sold-out-badge">Agotado</span>' : '';
 
           const imageUrl = item.imagen
             ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
@@ -1099,10 +1504,12 @@ async function cargarMenu() {
             <h3>${item.nombre}</h3>
             <p>${item.descripcion || ''}</p>
             <span>${formatCurrency(item.precio)}</span>
-            <button type="button" class="add-cart-btn">Agregar al carrito</button>
+            ${stockText}
+            <button type="button" class="add-cart-btn" ${soldOut ? 'disabled title="Producto agotado"' : ''}>Agregar al carrito</button>
           `;
 
           div.querySelector('.add-cart-btn')?.addEventListener('click', () => {
+            if (soldOut) return;
             addToCart({
               id: item.id,
               nombre: item.nombre,
@@ -1151,6 +1558,7 @@ window.refreshMenu = async function () {
 window.addEventListener('load', async () => {
   loadCart();
   setupCartModalEvents();
+  setupTrackingEvents();
   updateDireccionRequired();
   updateCartBadge();
   renderCartModal();
