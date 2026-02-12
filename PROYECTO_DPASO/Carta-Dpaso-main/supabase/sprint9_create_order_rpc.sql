@@ -1,0 +1,279 @@
+-- Sprint 9: RPC transaccional para crear pedidos
+-- Objetivo: insertar orders + order_items de forma atómica (una sola llamada RPC)
+
+create extension if not exists pgcrypto;
+
+-- ---------------------------------------------------------------------------
+-- Compatibilidad de columnas para totals y zona (idempotente)
+-- ---------------------------------------------------------------------------
+alter table if exists public.orders
+  add column if not exists subtotal numeric(10,2) not null default 0,
+  add column if not exists delivery_fee numeric(10,2) not null default 0,
+  add column if not exists provincia text,
+  add column if not exists distrito text;
+
+alter table if exists public.orders
+  alter column estado set default 'pending';
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_subtotal_check'
+      and conrelid = 'public.orders'::regclass
+  ) then
+    alter table public.orders
+      add constraint orders_subtotal_check
+      check (subtotal >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_delivery_fee_check'
+      and conrelid = 'public.orders'::regclass
+  ) then
+    alter table public.orders
+      add constraint orders_delivery_fee_check
+      check (delivery_fee >= 0);
+  end if;
+end $$;
+
+comment on column public.orders.subtotal is 'Subtotal de items al momento de crear el pedido';
+comment on column public.orders.delivery_fee is 'Costo de delivery al momento de crear el pedido';
+comment on column public.orders.provincia is 'Provincia de entrega para modalidad Delivery';
+comment on column public.orders.distrito is 'Distrito de entrega para modalidad Delivery';
+
+-- ---------------------------------------------------------------------------
+-- RPC transaccional
+-- ---------------------------------------------------------------------------
+drop function if exists public.create_order(jsonb);
+
+create or replace function public.create_order(payload jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_customer jsonb;
+  v_items jsonb;
+  v_totals jsonb;
+
+  v_name text;
+  v_phone text;
+  v_modalidad text;
+  v_address text;
+  v_referencia text;
+  v_provincia text;
+  v_distrito text;
+
+  v_subtotal numeric;
+  v_delivery_fee numeric;
+  v_total numeric;
+
+  v_order_id uuid;
+  v_short_id text;
+  v_created_at timestamptz;
+
+  v_item jsonb;
+  v_plato_id uuid;
+  v_item_name text;
+  v_item_price numeric;
+  v_item_qty integer;
+  v_item_subtotal numeric;
+  v_items_subtotal_calc numeric := 0;
+  v_has_zone boolean := false;
+begin
+  if payload is null or pg_catalog.jsonb_typeof(payload) <> 'object' then
+    raise exception 'Payload inválido';
+  end if;
+
+  v_customer := payload -> 'customer';
+  v_items := payload -> 'items';
+  v_totals := payload -> 'totals';
+
+  if pg_catalog.jsonb_typeof(v_customer) <> 'object' then
+    raise exception 'customer es obligatorio y debe ser objeto';
+  end if;
+  if pg_catalog.jsonb_typeof(v_items) <> 'array' then
+    raise exception 'items es obligatorio y debe ser array';
+  end if;
+  if pg_catalog.jsonb_typeof(v_totals) <> 'object' then
+    raise exception 'totals es obligatorio y debe ser objeto';
+  end if;
+  if pg_catalog.jsonb_array_length(v_items) = 0 then
+    raise exception 'El pedido debe incluir al menos un item';
+  end if;
+
+  v_name := pg_catalog.btrim(coalesce(v_customer ->> 'name', ''));
+  v_phone := pg_catalog.btrim(coalesce(v_customer ->> 'phone', ''));
+  v_modalidad := pg_catalog.btrim(coalesce(v_customer ->> 'modalidad', ''));
+  v_address := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'address', '')), '');
+  v_referencia := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'referencia', '')), '');
+  v_provincia := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'provincia', '')), '');
+  v_distrito := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'distrito', '')), '');
+
+  if v_name = '' then
+    raise exception 'customer.name es obligatorio';
+  end if;
+  if v_phone = '' then
+    raise exception 'customer.phone es obligatorio';
+  end if;
+  if v_modalidad not in ('Delivery', 'Recojo') then
+    raise exception 'customer.modalidad inválida';
+  end if;
+
+  begin
+    v_subtotal := (v_totals ->> 'subtotal')::numeric;
+    v_delivery_fee := (v_totals ->> 'delivery_fee')::numeric;
+    v_total := (v_totals ->> 'total')::numeric;
+  exception when others then
+    raise exception 'totals inválido: subtotal, delivery_fee y total deben ser numéricos';
+  end;
+
+  if v_subtotal < 0 then
+    raise exception 'subtotal no puede ser negativo';
+  end if;
+  if v_delivery_fee < 0 then
+    raise exception 'delivery_fee no puede ser negativo';
+  end if;
+  if v_total < 0 then
+    raise exception 'total no puede ser negativo';
+  end if;
+
+  if pg_catalog.abs(v_total - (v_subtotal + v_delivery_fee)) > 0.01 then
+    raise exception 'total no coincide con subtotal + delivery_fee';
+  end if;
+
+  if v_modalidad = 'Delivery' then
+    if v_address is null then
+      raise exception 'Para Delivery, customer.address es obligatorio';
+    end if;
+    if v_provincia is null or v_distrito is null then
+      raise exception 'Para Delivery, customer.provincia y customer.distrito son obligatorios';
+    end if;
+
+    select exists (
+      select 1
+      from public.delivery_zones dz
+      where dz.provincia = v_provincia
+        and dz.distrito = v_distrito
+        and dz.activo is true
+    )
+    into v_has_zone;
+
+    if not v_has_zone then
+      raise exception 'No hay cobertura activa para la zona seleccionada';
+    end if;
+  else
+    v_address := null;
+    v_provincia := null;
+    v_distrito := null;
+    v_delivery_fee := 0;
+
+    if pg_catalog.abs(v_total - v_subtotal) > 0.01 then
+      raise exception 'Para Recojo, total debe ser igual a subtotal';
+    end if;
+  end if;
+
+  insert into public.orders (
+    nombre_cliente,
+    telefono,
+    modalidad,
+    direccion,
+    referencia,
+    comentario,
+    subtotal,
+    delivery_fee,
+    total,
+    provincia,
+    distrito
+  ) values (
+    v_name,
+    v_phone,
+    v_modalidad,
+    v_address,
+    v_referencia,
+    nullif(pg_catalog.btrim(coalesce(payload ->> 'comment', '')), ''),
+    pg_catalog.round(v_subtotal, 2),
+    pg_catalog.round(v_delivery_fee, 2),
+    pg_catalog.round(v_total, 2),
+    v_provincia,
+    v_distrito
+  )
+  returning id, created_at into v_order_id, v_created_at;
+
+  for v_item in select value from pg_catalog.jsonb_array_elements(v_items)
+  loop
+    if pg_catalog.jsonb_typeof(v_item) <> 'object' then
+      raise exception 'Cada item debe ser objeto';
+    end if;
+
+    begin
+      v_plato_id := nullif(v_item ->> 'plato_id', '')::uuid;
+    exception when others then
+      raise exception 'item.plato_id inválido';
+    end;
+
+    v_item_name := pg_catalog.btrim(coalesce(v_item ->> 'nombre', ''));
+    if v_item_name = '' then
+      raise exception 'item.nombre es obligatorio';
+    end if;
+
+    begin
+      v_item_price := (v_item ->> 'precio')::numeric;
+      v_item_qty := (v_item ->> 'qty')::integer;
+    exception when others then
+      raise exception 'item.precio y item.qty deben ser numéricos';
+    end;
+
+    if v_item_price < 0 then
+      raise exception 'item.precio no puede ser negativo';
+    end if;
+    if v_item_qty <= 0 then
+      raise exception 'item.qty debe ser mayor a 0';
+    end if;
+
+    v_item_subtotal := pg_catalog.round((v_item_price * v_item_qty)::numeric, 2);
+    v_items_subtotal_calc := v_items_subtotal_calc + v_item_subtotal;
+
+    insert into public.order_items (
+      order_id,
+      plato_id,
+      nombre_snapshot,
+      precio_snapshot,
+      cantidad,
+      subtotal
+    ) values (
+      v_order_id,
+      v_plato_id,
+      v_item_name,
+      pg_catalog.round(v_item_price, 2),
+      v_item_qty,
+      v_item_subtotal
+    );
+  end loop;
+
+  if pg_catalog.abs(v_items_subtotal_calc - v_subtotal) > 0.01 then
+    raise exception 'subtotal no coincide con la suma de items';
+  end if;
+
+  v_short_id := pg_catalog.substring(pg_catalog.replace(v_order_id::text, '-', ''), 1, 8);
+
+  return pg_catalog.jsonb_build_object(
+    'order_id', v_order_id,
+    'short_id', v_short_id,
+    'created_at', v_created_at
+  );
+end;
+$$;
+
+comment on function public.create_order(jsonb) is
+'RPC atómica para crear un pedido e items en una sola transacción. Si falla, hace rollback completo.';
+
+-- Seguridad de ejecución: solo roles explícitos
+revoke all on function public.create_order(jsonb) from public;
+grant execute on function public.create_order(jsonb) to anon;
+grant execute on function public.create_order(jsonb) to authenticated;
