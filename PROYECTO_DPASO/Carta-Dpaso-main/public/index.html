@@ -127,6 +127,7 @@
     </div>
     <div class="receipt-actions">
       <button id="download-receipt-btn" class="receipt-download-btn" type="button">Descargar comprobante (PDF)</button>
+      <button id="btnVerEstadoPedido" class="receipt-track-btn" type="button" style="display:none;">Ver estado de mi pedido</button>
       <a id="receipt-whatsapp-btn" class="checkout-whatsapp" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Enviar por WhatsApp</a>
     </div>
   </div>
@@ -154,6 +155,7 @@
 
 <footer>
   <p>📍 Mz WI Lt. 37, Calle 46 San Antonio de Carapongo</p>
+  <p><a href="#" id="btnTracking" class="tracking-link">Rastrear pedido</a></p>
   <div class="socials">
     <a href="https://www.facebook.com/profile.php?id=61575799342894" target="_blank" rel="noopener noreferrer">
       <img src="images/Logos/facebook.png" alt="Facebook">
@@ -166,6 +168,24 @@
     </a>
   </div>
 </footer>
+
+<div id="trackingModal" class="tracking-modal" aria-hidden="true">
+  <div class="tracking-modal-card">
+    <h3>Rastrear pedido</h3>
+    <p class="tracking-muted">Ingresa tu código (ej: DP-AB12CD)</p>
+
+    <input id="trackingCode" type="text" placeholder="Código de pedido" />
+
+    <div class="tracking-row">
+      <button id="trackingSearchBtn" class="tracking-btn tracking-primary" type="button">Buscar</button>
+      <button id="trackingRefreshBtn" class="tracking-btn tracking-ghost" type="button" disabled>Actualizar</button>
+    </div>
+
+    <div id="trackingResult" class="tracking-result"></div>
+
+    <button id="trackingCloseBtn" class="tracking-btn tracking-danger tracking-full" type="button">Cerrar</button>
+  </div>
+</div>
 
 <!-- SUPABASE SDK -->
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
