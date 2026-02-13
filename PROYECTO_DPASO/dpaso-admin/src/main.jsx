@@ -9,6 +9,9 @@ import Perfil from "./pages/Perfil";
 import Pedidos from "./pages/Pedidos";
 import Tienda from "./pages/Tienda";
 import ZonasDelivery from "./pages/ZonasDelivery";
+import Caja from "./pages/Caja";
+import Reportes from "./pages/Reportes";
+import Clientes from "./pages/Clientes";
 import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -32,6 +35,9 @@ const router = createBrowserRouter([
       { path: "pedidos", element: <Pedidos /> }, // /pedidos
       { path: "tienda", element: <Tienda /> }, // /tienda
       { path: "zonas-delivery", element: <ZonasDelivery /> }, // /zonas-delivery
+      { path: "caja", element: <Caja /> }, // /caja
+      { path: "reportes", element: <Reportes /> }, // /reportes
+      { path: "clientes", element: <Clientes /> }, // /clientes
     ],
   },
 
