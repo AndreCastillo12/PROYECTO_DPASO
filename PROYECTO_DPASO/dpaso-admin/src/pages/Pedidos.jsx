@@ -4,14 +4,17 @@ import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 
-const ORDER_STATUS = ["pending", "accepted", "preparing", "ready", "delivered", "cancelled"];
+const ORDER_STATUS = ["pending", "accepted", "preparing", "ready", "dispatched", "delivered", "completed", "cancelled"];
+const PAYMENT_METHODS = ["cash", "yape", "plin", "card", "transfer", "other"];
 
 const STATUS_STYLES = {
   pending: { bg: "#f5eed6", color: "#8a6d1f" },
   accepted: { bg: "#e0ecff", color: "#1e4fa3" },
   preparing: { bg: "#efe4ff", color: "#6f3db7" },
   ready: { bg: "#ffe9d8", color: "#bb5f12" },
+  dispatched: { bg: "#e3f3ff", color: "#1f5f8a" },
   delivered: { bg: "#dff5e8", color: "#1f7a43" },
+  completed: { bg: "#d9fbe6", color: "#12633a" },
   cancelled: { bg: "#ffe0e0", color: "#b3261e" },
 };
 
@@ -22,6 +25,10 @@ function formatCurrency(value) {
 
 function shortOrderId(id = "") {
   return String(id).slice(-8).toUpperCase();
+}
+
+function getClientCode(order) {
+  return String(order?.short_code || '').trim().toUpperCase();
 }
 
 function formatDate(value) {
@@ -46,13 +53,26 @@ function normalizePhoneForWa(phoneValue) {
   return digits.startsWith("51") ? digits : `51${digits}`;
 }
 
+function humanPayment(method) {
+  const map = { cash: "Efectivo", yape: "Yape", plin: "Plin", card: "Tarjeta", transfer: "Transferencia", other: "Otro" };
+  return map[String(method || "").toLowerCase()] || (method || "No definido");
+}
+
+
+function safeNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function humanStatus(status) {
   const map = {
     pending: "Pendiente",
     accepted: "Aceptado",
     preparing: "Preparando",
     ready: "Listo",
+    dispatched: "En camino",
     delivered: "Entregado",
+    completed: "Completado",
     cancelled: "Cancelado",
   };
 
@@ -216,7 +236,9 @@ export default function Pedidos() {
 
       const customerName = String(order.nombre_cliente || "").toLowerCase();
       const customerPhone = String(order.telefono || "").toLowerCase();
-      return customerName.includes(term) || customerPhone.includes(term);
+      const clientCode = getClientCode(order).toLowerCase();
+      const internalCode = shortOrderId(order.id).toLowerCase();
+      return customerName.includes(term) || customerPhone.includes(term) || clientCode.includes(term) || internalCode.includes(term);
     });
   }, [orders, search, statusFilter]);
 
@@ -254,6 +276,73 @@ export default function Pedidos() {
     setBusyOrderId(null);
   };
 
+
+  const onSavePayment = async () => {
+    if (!selectedOrder?.id) return;
+
+    const isPaid = Boolean(selectedOrder.paid);
+    const method = selectedOrder.payment_method || null;
+    const total = safeNumber(selectedOrder.total);
+    const received = safeNumber(selectedOrder.cash_received);
+    const computedChange = method === "cash" && isPaid ? received - total : 0;
+
+    if (isPaid && !method) {
+      showToast("Selecciona método de pago", "error");
+      return;
+    }
+
+    if (isPaid && method === "cash" && received < total) {
+      showToast("El monto recibido no puede ser menor al total", "error");
+      return;
+    }
+
+    setBusyOrderId(selectedOrder.id);
+
+    const { error } = await supabase
+      .from("orders")
+      .update({
+        paid: isPaid,
+        payment_method: method,
+        paid_at: isPaid ? new Date().toISOString() : null,
+        cash_received: isPaid && method === "cash" ? received : null,
+        cash_change: isPaid && method === "cash" ? computedChange : null,
+      })
+      .eq("id", selectedOrder.id);
+
+    if (error) {
+      console.error("Error actualizando pago:", error);
+      const handled = await handleAuthError(error);
+      if (!handled) showToast("No se pudo actualizar pago", "error");
+      setBusyOrderId(null);
+      return;
+    }
+
+    setOrders((prev) => prev.map((item) => (
+      item.id === selectedOrder.id
+        ? {
+            ...item,
+            paid: isPaid,
+            payment_method: method,
+            paid_at: isPaid ? (item.paid_at || new Date().toISOString()) : null,
+            cash_received: isPaid && method === "cash" ? received : null,
+            cash_change: isPaid && method === "cash" ? computedChange : null,
+          }
+        : item
+    )));
+
+    setSelectedOrder((prev) => prev ? ({
+      ...prev,
+      paid: isPaid,
+      payment_method: method,
+      paid_at: isPaid ? (prev.paid_at || new Date().toISOString()) : null,
+      cash_received: isPaid && method === "cash" ? received : null,
+      cash_change: isPaid && method === "cash" ? computedChange : null,
+    }) : prev);
+
+    showToast("Pago actualizado ✅", "success");
+    setBusyOrderId(null);
+  };
+
   const openWhatsApp = () => {
     if (!selectedOrder) return;
 
@@ -263,9 +352,11 @@ export default function Pedidos() {
       return;
     }
 
+    const publicCode = getClientCode(selectedOrder) || shortOrderId(selectedOrder.id);
+
     const message = [
       `Hola ${selectedOrder.nombre_cliente || "cliente"},`,
-      `tu pedido #${shortOrderId(selectedOrder.id)} está ${humanStatus(selectedOrder.estado).toLowerCase()}.`,
+      `tu pedido ${publicCode} está ${humanStatus(selectedOrder.estado).toLowerCase()}.`,
       `Total ${formatCurrency(selectedOrder.total)}.`,
       "¡Gracias por comprar en DPASO!",
     ].join(" ");
@@ -304,7 +395,7 @@ export default function Pedidos() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ ...inputStyle, minWidth: 220 }}
-          placeholder="Buscar por cliente o teléfono"
+          placeholder="Buscar por cliente, teléfono, código cliente o ID interno"
         />
 
         <label style={toggleLabel}>
@@ -335,7 +426,8 @@ export default function Pedidos() {
               <table style={tableStyle}>
                 <thead>
                   <tr>
-                    <th style={thStyle}>Pedido</th>
+                    <th style={thStyle}>Código cliente</th>
+                    <th style={thStyle}>ID interno</th>
                     <th style={thStyle}>Fecha</th>
                     <th style={thStyle}>Cliente</th>
                     <th style={thStyle}>Teléfono</th>
@@ -353,6 +445,7 @@ export default function Pedidos() {
                         onClick={() => setSelectedOrder(order)}
                         style={{ ...trStyle, ...(isSelected ? trSelectedStyle : {}) }}
                       >
+                        <td style={tdStyle}><strong>{getClientCode(order) || "-"}</strong></td>
                         <td style={tdStyle}>#{shortOrderId(order.id)}</td>
                         <td style={tdStyle}>{formatDate(order.created_at)}</td>
                         <td style={tdStyle}>{order.nombre_cliente || "-"}</td>
@@ -360,7 +453,10 @@ export default function Pedidos() {
                         <td style={tdStyle}>{order.modalidad || "-"}</td>
                         <td style={tdStyle}>{formatCurrency(order.total)}</td>
                         <td style={tdStyle}>
-                          <span style={{ ...badgeStyle, ...getStatusStyle(order.estado) }}>{humanStatus(order.estado)}</span>
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <span style={{ ...badgeStyle, ...getStatusStyle(order.estado) }}>{humanStatus(order.estado)}</span>
+                            <small style={{ color: "#4b5563" }}>({order.estado || "-"})</small>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -377,29 +473,24 @@ export default function Pedidos() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <h3 style={{ margin: 0 }}>Pedido #{shortOrderId(selectedOrder.id)}</h3>
+                <h3 style={{ margin: 0 }}>Pedido {getClientCode(selectedOrder) || `#${shortOrderId(selectedOrder.id)}`}</h3>
                 <span style={{ ...badgeStyle, ...getStatusStyle(selectedOrder.estado) }}>
                   {humanStatus(selectedOrder.estado)}
                 </span>
               </div>
 
+              <p style={labelLine}><strong>Código cliente:</strong> {getClientCode(selectedOrder) || "-"}</p>
+              <p style={labelLine}><strong>ID interno:</strong> #{shortOrderId(selectedOrder.id)}</p>
               <p style={labelLine}><strong>Fecha:</strong> {formatDate(selectedOrder.created_at)}</p>
               <p style={labelLine}><strong>Cliente:</strong> {selectedOrder.nombre_cliente || "-"}</p>
               <p style={labelLine}><strong>Teléfono:</strong> {selectedOrder.telefono || "-"}</p>
               <p style={labelLine}><strong>Modalidad:</strong> {selectedOrder.modalidad || "-"}</p>
-
-              {selectedOrder.modalidad === "Delivery" && (
-                <>
-                  <p style={labelLine}><strong>Dirección:</strong> {selectedOrder.direccion || "-"}</p>
-                  <p style={labelLine}><strong>Referencia:</strong> {selectedOrder.referencia || "-"}</p>
-                </>
-              )}
-
-              <p style={labelLine}><strong>Comentario:</strong> {selectedOrder.comentario || "-"}</p>
+              <p style={labelLine}><strong>Método pago:</strong> {humanPayment(selectedOrder.payment_method)}</p>
+              <p style={labelLine}><strong>Pagado:</strong> {selectedOrder.paid ? "Sí" : "No"}</p>
 
               <div style={statusControlWrap}>
                 <label htmlFor="estado-order" style={{ fontWeight: 600, color: "#162447" }}>
-                  Cambiar estado
+                  Estado del pedido
                 </label>
                 <select
                   id="estado-order"
@@ -414,7 +505,78 @@ export default function Pedidos() {
                     </option>
                   ))}
                 </select>
+                <small style={{ color: "#4b5563" }}>Se actualiza al seleccionar un estado.</small>
               </div>
+
+              <div style={statusControlWrap}>
+                <label htmlFor="payment-method-order" style={{ fontWeight: 600, color: "#162447" }}>
+                  Método de pago
+                </label>
+                <select
+                  id="payment-method-order"
+                  style={inputStyle}
+                  value={selectedOrder.payment_method || ""}
+                  disabled={busyOrderId === selectedOrder.id}
+                  onChange={(e) => setSelectedOrder((prev) => ({ ...prev, payment_method: e.target.value }))}
+                >
+                  <option value="">Sin definir</option>
+                  {PAYMENT_METHODS.map((method) => (
+                    <option key={method} value={method}>{humanPayment(method)}</option>
+                  ))}
+                </select>
+              </div>
+
+              <label style={toggleLabel}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(selectedOrder.paid)}
+                  disabled={busyOrderId === selectedOrder.id}
+                  onChange={(e) => setSelectedOrder((prev) => ({ ...prev, paid: e.target.checked }))}
+                />
+                Pedido pagado
+              </label>
+
+              {Boolean(selectedOrder.paid) && selectedOrder.payment_method === "cash" && (
+                <>
+                  <div style={statusControlWrap}>
+                    <label htmlFor="cash-received-order" style={{ fontWeight: 600, color: "#162447" }}>
+                      Efectivo recibido
+                    </label>
+                    <input
+                      id="cash-received-order"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      style={inputStyle}
+                      value={selectedOrder.cash_received ?? ""}
+                      disabled={busyOrderId === selectedOrder.id}
+                      onChange={(e) => {
+                        const received = safeNumber(e.target.value);
+                        const total = safeNumber(selectedOrder.total);
+                        setSelectedOrder((prev) => ({
+                          ...prev,
+                          cash_received: e.target.value,
+                          cash_change: received - total,
+                        }));
+                      }}
+                    />
+                  </div>
+                  <p style={labelLine}><strong>Vuelto:</strong> {formatCurrency(safeNumber(selectedOrder.cash_change))}</p>
+                </>
+              )}
+
+              <button type="button" style={secondaryBtn} onClick={onSavePayment} disabled={busyOrderId === selectedOrder.id}>
+                Guardar pago
+              </button>
+
+              {selectedOrder.modalidad === "Delivery" && (
+                <>
+                  <p style={labelLine}><strong>Dirección:</strong> {selectedOrder.direccion || "-"}</p>
+                  <p style={labelLine}><strong>Referencia:</strong> {selectedOrder.referencia || "-"}</p>
+                </>
+              )}
+
+              <p style={labelLine}><strong>Comentario:</strong> {selectedOrder.comentario || "-"}</p>
 
               <button type="button" style={whatsappBtn} onClick={openWhatsApp}>
                 WhatsApp cliente
@@ -532,7 +694,7 @@ const inputStyle = {
 const tableStyle = {
   width: "100%",
   borderCollapse: "collapse",
-  minWidth: 760,
+  minWidth: 920,
 };
 
 const thStyle = {
