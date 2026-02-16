@@ -3,9 +3,17 @@
 // ===============================
 const SUPABASE_URL = 'https://gtczpfxdkiajprnluokq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd0Y3pwZnhka2lhanBybmx1b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTc5MTAsImV4cCI6MjA4NTk3MzkxMH0.UrV46fOq-YFQWykvR-eqPmlr-33w1aC7ynmywu_nsQ8';
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce'
+  }
+});
 
 const CART_STORAGE_KEY = 'dpaso_cart_v1';
+const TRACKING_LAST_CODE_STORAGE_KEY = 'dpaso_last_tracking_code';
 const WA_PHONE = '51941552878';
 
 let cart = [];
@@ -16,6 +24,38 @@ let storeSettings = null;
 let deliveryZones = [];
 let deliveryZonesLoaded = false;
 let orderSubmitBusy = false;
+let platosState = new Map();
+let lastOrderCode = '';
+let trackingIntervalId = null;
+let trackingLastCode = '';
+let authSession = null;
+let authProfile = null;
+let authSubscription = null;
+let authMode = 'login';
+let authRecoveryMode = false;
+
+function getAuthRedirectUrl() {
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+function friendlyAuthError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  if (message.includes('unsupported provider') || message.includes('provider is not enabled')) {
+    return 'Google no está habilitado en Supabase para este proyecto. Actívalo en Authentication > Providers > Google.';
+  }
+  if (message.includes('email not confirmed')) {
+    return 'Tu correo aún no está verificado. Revisa tu bandeja (y spam) y confirma tu cuenta.';
+  }
+  if (message.includes('invalid login credentials')) {
+    return 'Correo o contraseña incorrectos.';
+  }
+  if (message.includes('already registered') || message.includes('already been registered')) {
+    return 'Ese correo ya está registrado. Inicia sesión o recupera tu clave.';
+  }
+  return error?.message || 'No se pudo completar la acción de autenticación.';
+}
+
+const STATUS_ORDER = ['pending', 'accepted', 'preparing', 'ready', 'dispatched', 'delivered', 'completed', 'cancelled'];
 
 const DEFAULT_STORE_SETTINGS = {
   is_open: true,
@@ -54,8 +94,20 @@ function formatCurrency(value) {
   return `S/ ${Number(value).toFixed(2)}`;
 }
 
+function getCartItemAvailability(item) {
+  const plato = platosState.get(item.id);
+  return !isPlatoSoldOut(plato);
+}
+
 function getCartTotal() {
-  return cart.reduce((acc, item) => acc + (Number(item.precio) * Number(item.cantidad)), 0);
+  return cart.reduce((acc, item) => {
+    if (!getCartItemAvailability(item)) return acc;
+    return acc + (Number(item.precio) * Number(item.cantidad));
+  }, 0);
+}
+
+function getUnavailableCartItemsCount() {
+  return getUnavailableCartItems().reduce((acc, item) => acc + Number(item.cantidad || 0), 0);
 }
 
 function getCartCount() {
@@ -118,6 +170,265 @@ function showCartToast(message) {
   cartToastTimer = setTimeout(() => {
     toast.classList.remove('show');
   }, 1800);
+}
+
+function isPlatoSoldOut(plato) {
+  if (!plato) return true;
+  if (plato.is_available === false) return true;
+  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return true;
+  return false;
+}
+
+function getPlatoAvailabilityMessage(plato) {
+  if (!plato) return 'No disponible';
+  if (plato.is_available === false) return 'No disponible por el momento';
+  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return 'Agotado';
+  return '';
+}
+
+function getUnavailableCartItems() {
+  return cart.filter((item) => {
+    const plato = platosState.get(item.id);
+    return isPlatoSoldOut(plato);
+  });
+}
+
+
+function formatTrackingDate(dateIso) {
+  if (!dateIso) return '-';
+  const date = new Date(dateIso);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('es-PE');
+}
+
+function normalizeTrackingCode(rawCode = '') {
+  return String(rawCode).trim().toUpperCase();
+}
+
+
+function saveLastTrackingCode(code = '') {
+  const normalized = normalizeTrackingCode(code);
+  if (!normalized) return;
+  localStorage.setItem(TRACKING_LAST_CODE_STORAGE_KEY, normalized);
+}
+
+function getLastTrackingCode() {
+  return normalizeTrackingCode(localStorage.getItem(TRACKING_LAST_CODE_STORAGE_KEY) || '');
+}
+
+function refreshTrackingLastButton() {
+  const lastBtn = document.getElementById('trackingLastBtn');
+  if (!lastBtn) return;
+  const lastCode = getLastTrackingCode();
+  lastBtn.style.display = lastCode ? 'inline-flex' : 'none';
+}
+
+function humanTrackingStatus(status) {
+  const map = {
+    pending: 'Pendiente',
+    accepted: 'Aceptado',
+    preparing: 'Preparando',
+    ready: 'Listo',
+    dispatched: 'En camino',
+    delivered: 'Entregado',
+    completed: 'Completado',
+    cancelled: 'Cancelado'
+  };
+  return map[status] || status || '-';
+}
+
+function stopTrackingAutoRefresh() {
+  if (trackingIntervalId) {
+    clearInterval(trackingIntervalId);
+    trackingIntervalId = null;
+  }
+}
+
+function startTrackingAutoRefresh() {
+  stopTrackingAutoRefresh();
+  if (!trackingLastCode) return;
+
+  trackingIntervalId = setInterval(() => {
+    const modal = document.getElementById('trackingModal');
+    if (!modal || !modal.classList.contains('open')) {
+      stopTrackingAutoRefresh();
+      return;
+    }
+    fetchOrderStatus(trackingLastCode, { silent: true });
+  }, 25000);
+}
+
+function openTrackingModal(prefillCode = '') {
+  const modal = document.getElementById('trackingModal');
+  const input = document.getElementById('trackingCode');
+  if (!modal || !input) return;
+
+  const codeToUse = normalizeTrackingCode(prefillCode) || getLastTrackingCode();
+
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  if (codeToUse) input.value = codeToUse;
+  input.focus();
+  refreshTrackingLastButton();
+
+  if (codeToUse && prefillCode) {
+    fetchOrderStatus(codeToUse);
+  }
+}
+
+function closeTrackingModal() {
+  const modal = document.getElementById('trackingModal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  stopTrackingAutoRefresh();
+}
+
+function renderTrackingError(message) {
+  const result = document.getElementById('trackingResult');
+  const refreshBtn = document.getElementById('trackingRefreshBtn');
+  if (!result) return;
+
+  result.innerHTML = `<p class="tracking-error">${message}</p>`;
+  if (refreshBtn) refreshBtn.disabled = true;
+  stopTrackingAutoRefresh();
+}
+
+function buildTrackingTimeline(status) {
+  if (status === 'cancelled') {
+    return `<div class="tracking-timeline">
+      <div class="tracking-step cancelled">
+        <span class="tracking-step-dot"></span>
+        <span>Pedido cancelado</span>
+      </div>
+    </div>`;
+  }
+
+  const idx = STATUS_ORDER.indexOf(status);
+  const safeIndex = idx === -1 ? 0 : idx;
+
+  const steps = STATUS_ORDER.filter((s) => s !== 'cancelled').map((step, index) => {
+    const cls = index < safeIndex ? 'completed' : (index === safeIndex ? 'active' : '');
+    return `<div class="tracking-step ${cls}">
+      <span class="tracking-step-dot"></span>
+      <span>${humanTrackingStatus(step)}</span>
+    </div>`;
+  }).join('');
+
+  return `<div class="tracking-timeline">${steps}</div>`;
+}
+
+function renderTracking(data) {
+  const result = document.getElementById('trackingResult');
+  const refreshBtn = document.getElementById('trackingRefreshBtn');
+  if (!result || !data) return;
+
+  result.innerHTML = `
+    <div class="tracking-order-meta">
+      <p><strong>Código:</strong> ${data.short_code}</p>
+      <p><strong>Estado:</strong> ${humanTrackingStatus(data.status)}</p>
+      <p><strong>Modalidad:</strong> ${data.modalidad || '-'}</p>
+      <p><strong>Total:</strong> ${formatCurrency(data.total || 0)}</p>
+      <p><strong>Creado:</strong> ${formatTrackingDate(data.created_at)}</p>
+      <p><strong>Actualizado:</strong> ${formatTrackingDate(data.updated_at)}</p>
+    </div>
+    ${buildTrackingTimeline(data.status)}
+  `;
+
+  if (refreshBtn) refreshBtn.disabled = false;
+}
+
+async function fetchOrderStatus(code, options = {}) {
+  const normalizedCode = normalizeTrackingCode(code);
+  const result = document.getElementById('trackingResult');
+  const refreshBtn = document.getElementById('trackingRefreshBtn');
+
+  if (!normalizedCode) {
+    renderTrackingError('Ingresa un código válido para rastrear tu pedido.');
+    return;
+  }
+
+  if (!options.silent && result) {
+    result.innerHTML = '<p>Consultando estado...</p>';
+  }
+
+  try {
+    const { data, error } = await supabaseClient.rpc('get_order_status', { short_code: normalizedCode });
+    if (error) throw error;
+
+    trackingLastCode = normalizedCode;
+    saveLastTrackingCode(normalizedCode);
+    refreshTrackingLastButton();
+    renderTracking(data);
+    if (refreshBtn) refreshBtn.disabled = false;
+    startTrackingAutoRefresh();
+  } catch (error) {
+    const errMsg = String(error?.message || '');
+    if (errMsg.includes('INVALID_CODE')) {
+      renderTrackingError('Código inválido. Verifica e inténtalo nuevamente.');
+    } else if (errMsg.includes('NOT_FOUND')) {
+      renderTrackingError('No encontramos ese pedido. Revisa tu código.');
+    } else {
+      renderTrackingError('No se pudo consultar el estado del pedido. Intenta de nuevo.');
+    }
+  }
+}
+
+function setupTrackingEvents() {
+  const openBtn = document.getElementById('btnTracking');
+  const floatBtn = document.getElementById('tracking-float-btn');
+  const closeBtn = document.getElementById('trackingCloseBtn');
+  const searchBtn = document.getElementById('trackingSearchBtn');
+  const refreshBtn = document.getElementById('trackingRefreshBtn');
+  const lastBtn = document.getElementById('trackingLastBtn');
+  const input = document.getElementById('trackingCode');
+  const modal = document.getElementById('trackingModal');
+
+  openBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    openTrackingModal();
+  });
+
+  floatBtn?.addEventListener('click', () => {
+    openTrackingModal();
+  });
+
+  closeBtn?.addEventListener('click', closeTrackingModal);
+
+  searchBtn?.addEventListener('click', () => {
+    fetchOrderStatus(input?.value || '');
+  });
+
+  refreshBtn?.addEventListener('click', () => {
+    if (!trackingLastCode) return;
+    fetchOrderStatus(trackingLastCode);
+  });
+
+  lastBtn?.addEventListener('click', () => {
+    const lastCode = getLastTrackingCode();
+    if (!lastCode) return;
+    if (input) input.value = lastCode;
+    fetchOrderStatus(lastCode);
+  });
+
+  input?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      fetchOrderStatus(input.value);
+    }
+  });
+
+  modal?.addEventListener('click', (event) => {
+    if (event.target === modal) closeTrackingModal();
+  });
+
+  refreshTrackingLastButton();
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && modal?.classList.contains('open')) {
+      closeTrackingModal();
+    }
+  });
 }
 
 
@@ -330,18 +641,24 @@ function updateCartTotalsAndAvailability() {
   const confirmBtn = document.getElementById('confirm-order-btn');
   const zoneGroup = document.getElementById('delivery-zone-group');
   const zoneFeedback = document.getElementById('delivery-zone-feedback');
+  const availabilityNote = document.getElementById('cart-availability-note');
 
   if (!subtotalNode || !deliveryRow || !deliveryFeeNode || !totalNode) return;
 
   const totals = getCheckoutTotals(modalidad?.value || 'Delivery');
   const storeInfo = getStoreOpenInfo();
+  const unavailableItems = getUnavailableCartItems();
 
   subtotalNode.textContent = formatCurrency(totals.subtotal);
   totalNode.textContent = formatCurrency(totals.totalFinal);
 
   let blockedMessage = '';
 
-  if (!storeInfo.isOpen) {
+  if (unavailableItems.length > 0) {
+    blockedMessage = 'Tienes productos agotados en el carrito.';
+  }
+
+  if (!blockedMessage && !storeInfo.isOpen) {
     blockedMessage = storeInfo.reason || 'Fuera de horario';
     deliveryRow.style.display = 'none';
     if (zoneGroup) zoneGroup.style.display = 'none';
@@ -349,7 +666,7 @@ function updateCartTotalsAndAvailability() {
       zoneFeedback.style.display = 'none';
       zoneFeedback.textContent = '';
     }
-  } else if (totals.modalidad === 'Delivery') {
+  } else if (!blockedMessage && totals.modalidad === 'Delivery') {
     if (zoneGroup) zoneGroup.style.display = 'grid';
 
     if (!totals.hasZonesAvailable) {
@@ -398,12 +715,31 @@ function updateCartTotalsAndAvailability() {
 
   if (confirmBtn) {
     confirmBtn.disabled = Boolean(blockedMessage);
-    confirmBtn.textContent = blockedMessage
-      ? (storeInfo.isOpen ? 'Completa delivery' : 'Fuera de horario')
-      : 'Confirmar pedido';
+    if (!blockedMessage) {
+      confirmBtn.textContent = 'Confirmar pedido';
+    } else if (unavailableItems.length > 0) {
+      confirmBtn.textContent = 'Corrige productos';
+    } else {
+      confirmBtn.textContent = storeInfo.isOpen ? 'Completa delivery' : 'Fuera de horario';
+    }
   }
 
   renderStoreStatusBanner();
+
+  const unavailableCount = getUnavailableCartItemsCount();
+  if (availabilityNote) {
+    if (unavailableCount > 0) {
+      availabilityNote.style.display = 'block';
+      availabilityNote.textContent = `${unavailableCount} item(s) no disponible(s) no se incluyen en el total.`;
+    } else {
+      availabilityNote.style.display = 'none';
+      availabilityNote.textContent = '';
+    }
+  }
+
+  if (unavailableItems.length > 0) {
+    showFeedback('Algunos productos ya no están disponibles, elimínalos del carrito.', 'error');
+  }
 
 }
 
@@ -453,13 +789,16 @@ function renderReceipt(orderData) {
   const receiptBox = document.getElementById('order-receipt');
   const receiptContent = document.getElementById('order-receipt-content');
   const receiptWhatsAppBtn = document.getElementById('receipt-whatsapp-btn');
+  const receiptTrackBtn = document.getElementById('btnVerEstadoPedido');
   if (!receiptBox || !receiptContent || !orderData) return;
 
   const shortId = orderData.short_id || getShortOrderId(orderData.id);
+  const trackingCode = orderData.short_code || shortId;
   const lines = orderData.items.map((it) => `${it.nombre} · Cantidad: ${it.cantidad} · Precio: ${formatCurrency(it.precio)}`);
 
   receiptContent.innerHTML = `
     <p><strong>Pedido:</strong> #${shortId}</p>
+    <p><strong>Código de rastreo:</strong> ${trackingCode}</p>
     <p><strong>Cliente:</strong> ${orderData.nombre_cliente}</p>
     <p><strong>Teléfono:</strong> ${orderData.telefono}</p>
     <p><strong>Modalidad:</strong> ${orderData.modalidad}</p>
@@ -470,6 +809,10 @@ function renderReceipt(orderData) {
     <p><strong>Items:</strong></p>
     ${lines.map((line) => `<p>• ${line}</p>`).join('')}
   `;
+
+  if (receiptTrackBtn) {
+    receiptTrackBtn.style.display = 'inline-flex';
+  }
 
   if (receiptWhatsAppBtn) {
     receiptWhatsAppBtn.href = buildWhatsAppMessage(orderData);
@@ -483,9 +826,11 @@ function hideReceipt() {
   const receiptBox = document.getElementById('order-receipt');
   const receiptContent = document.getElementById('order-receipt-content');
   const receiptWhatsAppBtn = document.getElementById('receipt-whatsapp-btn');
+  const receiptTrackBtn = document.getElementById('btnVerEstadoPedido');
 
   if (receiptBox) receiptBox.style.display = 'none';
   if (receiptContent) receiptContent.innerHTML = '';
+  if (receiptTrackBtn) receiptTrackBtn.style.display = 'none';
   if (receiptWhatsAppBtn) {
     receiptWhatsAppBtn.style.display = 'none';
     receiptWhatsAppBtn.href = '#';
@@ -579,8 +924,50 @@ function updateCartBadge() {
   badge.textContent = getCartCount();
 }
 
+async function refreshCartAvailability() {
+  const ids = [...new Set(cart.map((item) => item.id).filter(Boolean))];
+  if (!ids.length) return;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('platos')
+      .select('id,is_available,track_stock,stock,precio')
+      .in('id', ids);
+
+    if (error) throw error;
+
+    (data || []).forEach((row) => {
+      const prev = platosState.get(row.id) || {};
+      platosState.set(row.id, { ...prev, ...row });
+    });
+
+    cart = cart.map((item) => {
+      const latest = (data || []).find((row) => row.id === item.id);
+      if (!latest) return item;
+      return { ...item, precio: Number(latest.precio ?? item.precio) };
+    });
+    saveCart();
+  } catch (error) {
+    console.warn('⚠️ No se pudo refrescar disponibilidad del carrito:', error?.message || error);
+  }
+}
+
 function addToCart(item) {
+  const platoState = platosState.get(item.id);
+  if (isPlatoSoldOut(platoState)) {
+    showCartToast(`⚠️ ${item.nombre} está agotado`);
+    return;
+  }
+
   const found = cart.find(x => x.id === item.id);
+
+  if (found && platoState?.track_stock === true) {
+    const maxStock = Number(platoState.stock ?? 0);
+    if (found.cantidad >= maxStock) {
+      showCartToast(`⚠️ Solo quedan ${maxStock} de ${item.nombre}`);
+      return;
+    }
+  }
 
   if (found) {
     found.cantidad += 1;
@@ -602,6 +989,20 @@ function addToCart(item) {
 function changeCartQty(itemId, delta) {
   const item = cart.find(x => x.id === itemId);
   if (!item) return;
+
+  const platoState = platosState.get(itemId);
+  if (delta > 0 && isPlatoSoldOut(platoState)) {
+    showCartToast(`⚠️ ${item.nombre} no está disponible`);
+    return;
+  }
+
+  if (delta > 0 && platoState?.track_stock === true) {
+    const maxStock = Number(platoState.stock ?? 0);
+    if (item.cantidad >= maxStock) {
+      showCartToast(`⚠️ Stock máximo alcanzado para ${item.nombre}`);
+      return;
+    }
+  }
 
   item.cantidad += delta;
   if (item.cantidad <= 0) {
@@ -648,6 +1049,7 @@ function openCartModal() {
   modal.setAttribute('aria-hidden', 'false');
   getStoreSettings();
   getDeliveryZones();
+  refreshCartAvailability().then(() => renderCartModal());
 }
 
 function closeCartModal() {
@@ -681,6 +1083,9 @@ function renderCartModal() {
     cart.forEach(item => {
       const row = document.createElement('div');
       row.className = 'cart-item';
+      const platoInfo = platosState.get(item.id);
+      const isUnavailable = isPlatoSoldOut(platoInfo);
+      const availabilityMsg = getPlatoAvailabilityMessage(platoInfo);
 
       if (checkoutStepOpen) {
         row.innerHTML = `
@@ -689,6 +1094,7 @@ function renderCartModal() {
             <h4>${item.nombre}</h4>
             <p>Cantidad: ${item.cantidad}</p>
             <p>Precio: ${formatCurrency(item.precio)}</p>
+            ${availabilityMsg ? `<p style="color:#b42318;font-weight:600;">${availabilityMsg}</p>` : ''}
           </div>
         `;
       } else {
@@ -697,10 +1103,11 @@ function renderCartModal() {
           <div class="cart-item-data">
             <h4>${item.nombre}</h4>
             <p>${formatCurrency(item.precio)}</p>
+            ${availabilityMsg ? `<p style="color:#b42318;font-weight:600;">${availabilityMsg}</p>` : ''}
             <div class="cart-item-actions">
               <button type="button" data-action="minus" data-id="${item.id}">-</button>
               <span>${item.cantidad}</span>
-              <button type="button" data-action="plus" data-id="${item.id}">+</button>
+              <button type="button" data-action="plus" data-id="${item.id}" ${isUnavailable ? 'disabled title="Producto no disponible"' : ''}>+</button>
               <button type="button" data-action="delete" data-id="${item.id}" class="danger">Eliminar</button>
             </div>
           </div>
@@ -760,6 +1167,7 @@ function setupCartModalEvents() {
   const backToCartBtn = document.getElementById('back-to-cart-btn');
   const receiptModal = document.getElementById('receipt-modal');
   const receiptCloseBtn = document.getElementById('receipt-close-btn');
+  const trackOrderBtn = document.getElementById('btnVerEstadoPedido');
 
   cartButton?.addEventListener('click', openCartModal);
   closeButton?.addEventListener('click', closeCartModal);
@@ -773,6 +1181,11 @@ function setupCartModalEvents() {
   });
 
   receiptCloseBtn?.addEventListener('click', closeReceiptModal);
+  trackOrderBtn?.addEventListener('click', () => {
+    const code = lastOrderCode || lastOrderData?.short_id || '';
+    closeReceiptModal();
+    openTrackingModal(code);
+  });
 
   itemsContainer?.addEventListener('click', (e) => {
     if (checkoutStepOpen) return;
@@ -835,6 +1248,389 @@ function setupCartModalEvents() {
   document.getElementById('checkout-form')?.addEventListener('submit', submitOrder);
 }
 
+
+
+async function getCustomerProfileByAuth() {
+  const uid = authSession?.user?.id;
+  if (!uid) {
+    authProfile = null;
+    return null;
+  }
+
+  const { data, error } = await supabaseClient.rpc('rpc_get_my_customer_profile');
+  if (error) {
+    console.warn('⚠️ No se pudo cargar perfil de cliente:', error?.message || error);
+    authProfile = null;
+    return null;
+  }
+
+  authProfile = data || null;
+  return authProfile;
+}
+
+function setAuthFeedback(message = '', type = 'info') {
+  const feedback = document.getElementById('authFeedback');
+  if (!feedback) return;
+  feedback.textContent = message;
+  feedback.className = `checkout-feedback ${type}`;
+}
+
+function setAuthMode(mode = 'login') {
+  authMode = ['login', 'register', 'reset'].includes(mode) ? mode : 'login';
+
+  const loginView = document.getElementById('authLoginView');
+  const registerView = document.getElementById('authRegisterView');
+  const resetView = document.getElementById('authResetView');
+  const tabLogin = document.getElementById('authTabLogin');
+  const tabRegister = document.getElementById('authTabRegister');
+
+  if (loginView) loginView.style.display = authMode === 'login' ? 'block' : 'none';
+  if (registerView) registerView.style.display = authMode === 'register' ? 'block' : 'none';
+  if (resetView) resetView.style.display = authMode === 'reset' ? 'block' : 'none';
+
+  const showTabs = authMode !== 'reset';
+  tabLogin?.classList.toggle('active', authMode === 'login');
+  tabRegister?.classList.toggle('active', authMode === 'register');
+  if (tabLogin) tabLogin.style.display = showTabs ? 'block' : 'none';
+  if (tabRegister) tabRegister.style.display = showTabs ? 'block' : 'none';
+
+  setAuthFeedback('');
+}
+
+function normalizePhoneInput(raw = '') {
+  return String(raw || '').replace(/\D/g, '').slice(0, 9);
+}
+
+function normalizeDniInput(raw = '') {
+  return String(raw || '').replace(/\D/g, '').slice(0, 8);
+}
+
+function fillCheckoutFromAuth() {
+  const nameInput = document.getElementById('checkout-nombre');
+  const phoneInput = document.getElementById('checkout-telefono');
+  if (!nameInput || !phoneInput) return;
+
+  if (authProfile?.name) nameInput.value = authProfile.name;
+  if (authProfile?.phone) phoneInput.value = normalizePhoneInput(authProfile.phone);
+}
+
+function updateAuthUi() {
+  const loggedOut = document.getElementById('authLoggedOutView');
+  const loggedIn = document.getElementById('authLoggedInView');
+  const authUserInfo = document.getElementById('authUserInfo');
+  const authWelcome = document.getElementById('authWelcome');
+  const authFloatLabel = document.getElementById('auth-float-label');
+  const profileName = document.getElementById('authProfileName');
+  const profilePhone = document.getElementById('authProfilePhone');
+  const profileDni = document.getElementById('authProfileDni');
+
+  const isLogged = Boolean(authSession?.user);
+  const forceLoggedOutUi = authRecoveryMode === true;
+
+  if (loggedOut) loggedOut.style.display = (!isLogged || forceLoggedOutUi) ? 'block' : 'none';
+  if (loggedIn) loggedIn.style.display = (isLogged && !forceLoggedOutUi) ? 'block' : 'none';
+
+  if (isLogged && !forceLoggedOutUi) {
+    const email = authSession?.user?.email || authProfile?.email || '-';
+    const name = authProfile?.name || 'Cliente';
+    if (authUserInfo) authUserInfo.textContent = `${name} · ${email}`;
+    if (authWelcome) authWelcome.textContent = 'Tu sesión está activa. Puedes comprar, editar tu perfil y revisar historial.';
+    if (authFloatLabel) authFloatLabel.textContent = 'Mi cuenta';
+    if (profileName) profileName.value = authProfile?.name || '';
+    if (profilePhone) profilePhone.value = normalizePhoneInput(authProfile?.phone || '');
+    if (profileDni) profileDni.value = normalizeDniInput(authProfile?.dni || '');
+    fillCheckoutFromAuth();
+  } else {
+    if (authUserInfo) authUserInfo.textContent = '';
+    if (authWelcome) {
+      authWelcome.textContent = authRecoveryMode
+        ? 'Estás en recuperación de contraseña. Define tu nueva clave.'
+        : 'Compra como invitado o ingresa para ver tu historial.';
+    }
+    if (authFloatLabel) authFloatLabel.textContent = 'Ingresar';
+  }
+}
+
+function openAuthModal() {
+  const modal = document.getElementById('authModal');
+  if (!modal) return;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeAuthModal() {
+  const modal = document.getElementById('authModal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function closeMyOrdersModal() {
+  const modal = document.getElementById('myOrdersModal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+async function openMyOrdersModal() {
+  const modal = document.getElementById('myOrdersModal');
+  const result = document.getElementById('myOrdersResult');
+  if (!modal || !result) return;
+
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  result.innerHTML = '<p>Cargando tus pedidos...</p>';
+
+  const { data, error } = await supabaseClient.rpc('rpc_my_orders');
+  if (error) {
+    result.innerHTML = `<p class="tracking-error">${error.message || 'No se pudo cargar historial.'}</p>`;
+    return;
+  }
+
+  if (!Array.isArray(data) || data.length === 0) {
+    result.innerHTML = '<p>No tienes pedidos registrados todavía.</p>';
+    return;
+  }
+
+  result.innerHTML = data.map((o) => `
+    <div class="tracking-order-meta" style="padding:8px 0;border-bottom:1px solid #e4e7ec;">
+      <p><strong>${o.short_code || (o.id || '').slice(-8).toUpperCase()}</strong> · ${humanTrackingStatus(o.estado)}</p>
+      <p>${formatTrackingDate(o.created_at)} · ${o.modalidad || '-'} · ${formatCurrency(o.total || 0)}</p>
+      <p>Pago: ${o.paid ? 'Sí' : 'No'} (${o.payment_method || 'sin definir'})</p>
+    </div>
+  `).join('');
+}
+
+async function handleResetPasswordUpdate() {
+  const password = String(document.getElementById('authResetPassword')?.value || '').trim();
+  const confirm = String(document.getElementById('authResetPasswordConfirm')?.value || '').trim();
+
+  if (!password || password.length < 6) {
+    setAuthFeedback('La nueva contraseña debe tener al menos 6 caracteres.', 'error');
+    return;
+  }
+  if (password !== confirm) {
+    setAuthFeedback('La confirmación no coincide.', 'error');
+    return;
+  }
+
+  const { error } = await supabaseClient.auth.updateUser({ password });
+  if (error) {
+    setAuthFeedback(friendlyAuthError(error), 'error');
+    return;
+  }
+
+  authRecoveryMode = false;
+  setAuthMode('login');
+  setAuthFeedback('Contraseña actualizada ✅. Ya puedes iniciar sesión.', 'success');
+}
+
+async function handleSaveProfile() {
+  if (!authSession?.user?.id) return;
+
+  const name = String(document.getElementById('authProfileName')?.value || '').trim();
+  const phone = normalizePhoneInput(document.getElementById('authProfilePhone')?.value || '');
+  const dni = normalizeDniInput(document.getElementById('authProfileDni')?.value || '');
+
+  if (!name || !phone || phone.length !== 9 || dni.length !== 8) {
+    setAuthFeedback('Completa nombre, teléfono (9) y DNI (8) válidos.', 'error');
+    return;
+  }
+
+  const { data, error } = await supabaseClient.rpc('rpc_upsert_my_customer_profile', {
+    p_name: name,
+    p_phone: phone,
+    p_dni: dni,
+  });
+
+  if (error) {
+    setAuthFeedback(error.message || 'No se pudo guardar perfil.', 'error');
+    return;
+  }
+
+  authProfile = data || authProfile;
+  updateAuthUi();
+  setAuthFeedback('Perfil actualizado ✅', 'success');
+}
+
+async function handleRegister() {
+  const name = String(document.getElementById('authRegisterName')?.value || '').trim();
+  const phone = normalizePhoneInput(document.getElementById('authRegisterPhone')?.value || '');
+  const dni = normalizeDniInput(document.getElementById('authRegisterDni')?.value || '');
+  const email = String(document.getElementById('authRegisterEmail')?.value || '').trim().toLowerCase();
+  const password = String(document.getElementById('authRegisterPassword')?.value || '').trim();
+
+  if (!name || !email || !password || phone.length !== 9 || dni.length !== 8) {
+    setAuthFeedback('Completa nombre, teléfono (9), DNI (8), correo y contraseña.', 'error');
+    return;
+  }
+
+  const { data, error } = await supabaseClient.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: getAuthRedirectUrl(),
+      data: { name, phone, dni }
+    }
+  });
+
+  if (error) {
+    setAuthFeedback(friendlyAuthError(error), 'error');
+    return;
+  }
+
+  const existingAccount = Array.isArray(data?.user?.identities) && data.user.identities.length === 0;
+  if (existingAccount) {
+    setAuthFeedback('Ese correo ya está registrado. Inicia sesión o recupera tu clave.', 'error');
+    setAuthMode('login');
+    return;
+  }
+
+  setAuthFeedback('Te enviamos un correo de verificación. Revisa tu bandeja.', 'success');
+}
+
+async function handleLogin() {
+  const email = String(document.getElementById('authLoginEmail')?.value || '').trim().toLowerCase();
+  const password = String(document.getElementById('authLoginPassword')?.value || '').trim();
+  if (!email || !password) {
+    setAuthFeedback('Ingresa correo y contraseña.', 'error');
+    return;
+  }
+
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (error) {
+    setAuthFeedback(friendlyAuthError(error), 'error');
+    return;
+  }
+  authRecoveryMode = false;
+  setAuthFeedback('Sesión iniciada ✅', 'success');
+  closeAuthModal();
+}
+
+async function handleResetPassword() {
+  const email = String(document.getElementById('authLoginEmail')?.value || '').trim().toLowerCase();
+  if (!email) {
+    setAuthFeedback('Ingresa tu correo para recuperar contraseña.', 'error');
+    return;
+  }
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+    redirectTo: getAuthRedirectUrl()
+  });
+  if (error) {
+    setAuthFeedback(friendlyAuthError(error), 'error');
+    return;
+  }
+  setAuthFeedback('Correo de recuperación enviado ✅', 'success');
+}
+
+async function handleGoogleLogin() {
+  const { error } = await supabaseClient.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: getAuthRedirectUrl() }
+  });
+  if (error) setAuthFeedback(friendlyAuthError(error), 'error');
+}
+
+async function handleLogout() {
+  let signOutError = null;
+  const { error: globalError } = await supabaseClient.auth.signOut({ scope: 'global' });
+  if (globalError) {
+    const { error: localError } = await supabaseClient.auth.signOut({ scope: 'local' });
+    signOutError = localError || globalError;
+  }
+
+  authRecoveryMode = false;
+  authSession = null;
+  authProfile = null;
+  setAuthMode('login');
+  updateAuthUi();
+  closeMyOrdersModal();
+
+  if (signOutError) {
+    setAuthFeedback(`Sesión local cerrada. ${friendlyAuthError(signOutError)}`, 'info');
+    return;
+  }
+
+  setAuthMode('login');
+  setAuthFeedback('Sesión cerrada ✅', 'success');
+}
+
+async function initAuth() {
+  const authBtn = document.getElementById('auth-float-btn');
+  const authClose = document.getElementById('authCloseBtn');
+  const authModal = document.getElementById('authModal');
+  const myOrdersModal = document.getElementById('myOrdersModal');
+
+  authBtn?.addEventListener('click', openAuthModal);
+  authClose?.addEventListener('click', closeAuthModal);
+  authModal?.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
+  myOrdersModal?.addEventListener('click', (e) => { if (e.target === myOrdersModal) closeMyOrdersModal(); });
+
+  document.getElementById('authTabLogin')?.addEventListener('click', () => setAuthMode('login'));
+  document.getElementById('authTabRegister')?.addEventListener('click', () => setAuthMode('register'));
+  document.getElementById('authRegisterBtn')?.addEventListener('click', handleRegister);
+  document.getElementById('authLoginBtn')?.addEventListener('click', handleLogin);
+  document.getElementById('authGoogleBtn')?.addEventListener('click', handleGoogleLogin);
+  document.getElementById('authResetLink')?.addEventListener('click', handleResetPassword);
+  document.getElementById('authResetSaveBtn')?.addEventListener('click', handleResetPasswordUpdate);
+  document.getElementById('authLogoutBtn')?.addEventListener('click', handleLogout);
+  document.getElementById('authMyOrdersBtn')?.addEventListener('click', openMyOrdersModal);
+  document.getElementById('authEditProfileBtn')?.addEventListener('click', () => {
+    const card = document.getElementById('authProfileView');
+    if (!card) return;
+    const show = card.style.display === 'none' || !card.style.display;
+    card.style.display = show ? 'block' : 'none';
+  });
+  document.getElementById('authProfileSaveBtn')?.addEventListener('click', handleSaveProfile);
+  document.getElementById('myOrdersCloseBtn')?.addEventListener('click', closeMyOrdersModal);
+
+  setAuthMode('login');
+
+  const hash = String(window.location.hash || '');
+  const isRecoveryLink = hash.includes('type=recovery');
+  if (hash.includes('access_token=')) {
+    window.history.replaceState({}, document.title, getAuthRedirectUrl());
+  }
+
+  const { data } = await supabaseClient.auth.getSession();
+  authSession = data?.session || null;
+  await getCustomerProfileByAuth();
+
+  if (isRecoveryLink) {
+    authRecoveryMode = true;
+    setAuthMode('reset');
+    openAuthModal();
+  }
+
+  updateAuthUi();
+
+  if (hash.includes('access_token=') && authSession?.user && !isRecoveryLink) {
+    setAuthMode('login');
+    setAuthFeedback('Sesión iniciada correctamente ✅', 'success');
+    openAuthModal();
+  }
+
+  authSubscription?.subscription?.unsubscribe?.();
+  authSubscription = supabaseClient.auth.onAuthStateChange(async (event, session) => {
+    authSession = session || null;
+    await getCustomerProfileByAuth();
+
+    if (event === 'PASSWORD_RECOVERY') {
+      authRecoveryMode = true;
+      setAuthMode('reset');
+      openAuthModal();
+    }
+
+    if (event === 'SIGNED_OUT') {
+      authRecoveryMode = false;
+      setAuthMode('login');
+      closeMyOrdersModal();
+    }
+
+    updateAuthUi();
+  });
+}
+
 // ===============================
 // CHECKOUT + SUPABASE
 // ===============================
@@ -861,12 +1657,21 @@ async function submitOrder(event) {
     return;
   }
 
+  await refreshCartAvailability();
+
   const formData = new FormData(form);
+  const unavailableItems = getUnavailableCartItems();
+  if (unavailableItems.length > 0) {
+    showFeedback('Algunos productos ya no están disponibles, elimínalos del carrito.', 'error');
+    renderCartModal();
+    return;
+  }
+
   const normalizedModalidad = normalizeModalidad(formData.get('modalidad'));
   const totals = getCheckoutTotals(normalizedModalidad);
 
-  const customerName = String(formData.get('nombre') || '').trim();
-  const phoneRaw = String(formData.get('telefono') || '').trim();
+  const customerName = String(formData.get('nombre') || '').trim() || String(authProfile?.name || '').trim();
+  const phoneRaw = String(formData.get('telefono') || '').trim() || String(authProfile?.phone || '').trim();
   const addressRaw = String(formData.get('direccion') || '').trim();
   const referenciaRaw = String(formData.get('referencia') || '').trim();
   const comentarioRaw = String(formData.get('comentario') || '').trim();
@@ -955,7 +1760,8 @@ async function submitOrder(event) {
       address: addressRaw || null,
       referencia: referenciaRaw || null,
       provincia: normalizedModalidad === 'Delivery' ? (totals.provincia || null) : null,
-      distrito: normalizedModalidad === 'Delivery' ? (totals.distrito || null) : null
+      distrito: normalizedModalidad === 'Delivery' ? (totals.distrito || null) : null,
+      email: authSession?.user?.email || null
     },
     comment: comentarioRaw || null,
     items: normalizedItems.map((item) => ({
@@ -973,6 +1779,7 @@ async function submitOrder(event) {
 
   let orderId = null;
   let shortId = '';
+  let shortCode = '';
   let createdAt = null;
 
   try {
@@ -989,6 +1796,7 @@ async function submitOrder(event) {
 
     orderId = rpcData?.order_id || null;
     shortId = String(rpcData?.short_id || '');
+    shortCode = String(rpcData?.short_code || shortId || '');
     createdAt = rpcData?.created_at || null;
 
     if (!orderId) throw new Error('No se pudo obtener order_id desde create_order.');
@@ -996,6 +1804,7 @@ async function submitOrder(event) {
     lastOrderData = {
       id: orderId,
       short_id: shortId || getShortOrderId(orderId),
+      short_code: shortCode || shortId || getShortOrderId(orderId),
       nombre_cliente: customerName,
       telefono: telefonoLimpio,
       modalidad: normalizedModalidad,
@@ -1015,6 +1824,9 @@ async function submitOrder(event) {
         subtotal: i.subtotal
       }))
     };
+
+    lastOrderCode = lastOrderData.short_code || lastOrderData.short_id;
+    saveLastTrackingCode(lastOrderCode);
 
     showFeedback(`✅ Pedido creado (#${lastOrderData.short_id}). Tu comprobante está listo.`, 'success');
     renderReceipt(lastOrderData);
@@ -1036,7 +1848,14 @@ async function submitOrder(event) {
       orderId,
       payload: getSafeOrderPayloadForLogs(rpcPayload)
     });
-    showFeedback('No se pudo crear el pedido. Revisa tu conexión o intenta de nuevo.', 'error');
+    const errorMessage = String(error?.message || '');
+    if (errorMessage.includes('OUT_OF_STOCK') || errorMessage.includes('NOT_AVAILABLE')) {
+      showFeedback('Algunos productos ya no están disponibles, elimínalos del carrito.', 'error');
+      await cargarMenu();
+    } else {
+      const backendMessage = String(error?.message || '').trim();
+      showFeedback(backendMessage ? `No se pudo crear el pedido: ${backendMessage}` : 'No se pudo crear el pedido. Revisa tu conexión o intenta de nuevo.', 'error');
+    }
   } finally {
     orderSubmitBusy = false;
     submitBtn.disabled = false;
@@ -1056,7 +1875,7 @@ async function cargarMenu() {
   try {
     const { data: platosData, error: platosError } = await supabaseClient
       .from('platos')
-      .select('*')
+      .select('id,nombre,descripcion,precio,imagen,categoria_id,orden,is_available,track_stock,stock')
       .order('orden', { ascending: true });
 
     if (platosError) throw platosError;
@@ -1067,6 +1886,8 @@ async function cargarMenu() {
       .order('orden', { ascending: true });
 
     if (categoriasError) throw categoriasError;
+
+    platosState = new Map((platosData || []).map((p) => [p.id, p]));
 
     menu.innerHTML = '';
     nav.innerHTML = '';
@@ -1089,6 +1910,8 @@ async function cargarMenu() {
         items.forEach(item => {
           const div = document.createElement('div');
           div.className = 'plato fade-up';
+          const soldOut = isPlatoSoldOut(item);
+          const stockText = soldOut ? '<span class="sold-out-badge">Agotado</span>' : '';
 
           const imageUrl = item.imagen
             ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
@@ -1099,10 +1922,12 @@ async function cargarMenu() {
             <h3>${item.nombre}</h3>
             <p>${item.descripcion || ''}</p>
             <span>${formatCurrency(item.precio)}</span>
-            <button type="button" class="add-cart-btn">Agregar al carrito</button>
+            ${stockText}
+            <button type="button" class="add-cart-btn" ${soldOut ? 'disabled title="Producto agotado"' : ''}>Agregar al carrito</button>
           `;
 
           div.querySelector('.add-cart-btn')?.addEventListener('click', () => {
+            if (soldOut) return;
             addToCart({
               id: item.id,
               nombre: item.nombre,
@@ -1151,6 +1976,8 @@ window.refreshMenu = async function () {
 window.addEventListener('load', async () => {
   loadCart();
   setupCartModalEvents();
+  setupTrackingEvents();
+  await initAuth();
   updateDireccionRequired();
   updateCartBadge();
   renderCartModal();
