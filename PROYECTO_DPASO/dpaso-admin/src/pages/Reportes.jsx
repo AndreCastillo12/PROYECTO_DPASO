@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import { exportRowsToCsv } from "../utils/csv";
+import { logTelemetryEvent } from "../utils/telemetry";
 
 const REPORT_TYPES = [
   { value: "day", label: "Ventas por día" },
@@ -46,6 +47,7 @@ export default function Reportes() {
     });
 
     if (error) {
+      logTelemetryEvent({ level: "error", area: "reportes", event: "rpc_sales_report_failed", message: error.message || "No se pudo cargar reporte", meta: { code: error.code, groupBy } });
       showToast(error.message || "No se pudo cargar reporte", "error");
       setRows([]);
       setLoading(false);
@@ -61,6 +63,7 @@ export default function Reportes() {
       .lte("created_at", toIso);
 
     if (kpiError) {
+      logTelemetryEvent({ level: "warning", area: "reportes", event: "load_kpis_failed", message: kpiError.message || "No se pudieron calcular KPIs", meta: { code: kpiError.code } });
       showToast("No se pudieron calcular KPIs", "warning");
     } else {
       const safeOrders = kpiOrders || [];

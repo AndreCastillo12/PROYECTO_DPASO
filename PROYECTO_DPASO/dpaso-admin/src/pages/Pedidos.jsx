@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
+import { logTelemetryEvent } from "../utils/telemetry";
 
 const ORDER_STATUS = ["pending", "accepted", "preparing", "ready", "dispatched", "delivered", "completed", "cancelled"];
 const PAYMENT_METHODS = ["cash", "yape", "plin", "card", "transfer", "other"];
@@ -128,6 +129,9 @@ export default function Pedidos() {
           code: error.code,
         });
 
+        logTelemetryEvent({ level: "error", area: "pedidos", event: "load_orders_failed", message: error.message || "No se pudo cargar pedidos", meta: { code: error.code } });
+
+
         const handled = await handleAuthError(error);
         if (!handled && notifyOnError) {
           showToast("No se pudo cargar pedidos", "error");
@@ -170,6 +174,8 @@ export default function Pedidos() {
           code: error.code,
           orderId,
         });
+
+        logTelemetryEvent({ level: "error", area: "pedidos", event: "load_order_items_failed", message: error.message || "No se pudo cargar items", meta: { code: error.code, orderId } });
 
         const handled = await handleAuthError(error);
         if (!handled && notifyOnError) {
