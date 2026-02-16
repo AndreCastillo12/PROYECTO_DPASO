@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
+import { readAdminPreference, saveAdminPreference } from "../utils/adminPreferences";
 
 function money(value) {
   return `S/ ${Number(value || 0).toFixed(2)}`;
@@ -16,16 +17,22 @@ function formatDate(value) {
 export default function Clientes() {
   const navigate = useNavigate();
   const { toast, showToast } = useToast(2600);
+  const initialPrefs = readAdminPreference("clientes_filters", {
+    search: "",
+    sortBy: "last_order_at",
+    accountFilter: "all",
+  });
 
   const [loading, setLoading] = useState(true);
+  const [firstLoadDone, setFirstLoadDone] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [clients, setClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState(null);
   const [orders, setOrders] = useState([]);
-  const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState("last_order_at");
-  const [accountFilter, setAccountFilter] = useState("all");
+  const [search, setSearch] = useState(initialPrefs.search || "");
+  const [sortBy, setSortBy] = useState(initialPrefs.sortBy || "last_order_at");
+  const [accountFilter, setAccountFilter] = useState(initialPrefs.accountFilter || "all");
 
   const loadClients = useCallback(async () => {
     setLoading(true);
@@ -55,8 +62,9 @@ export default function Clientes() {
     const { data, error } = await query;
 
     if (error) {
-      showToast(error.message || "No se pudo cargar clientes", "error");
+      showToast(error.message || "No se pudo cargar clientes. Intenta nuevamente.", "error");
       setLoading(false);
+      setFirstLoadDone(true);
       return;
     }
 
@@ -67,6 +75,7 @@ export default function Clientes() {
       return rows.find((r) => r.id === prev.id) || rows[0] || null;
     });
     setLoading(false);
+    setFirstLoadDone(true);
   }, [accountFilter, search, showToast, sortBy]);
 
   const loadClientOrders = useCallback(async (customerId) => {
@@ -84,7 +93,7 @@ export default function Clientes() {
       .limit(100);
 
     if (error) {
-      showToast(error.message || "No se pudo cargar historial", "error");
+      showToast(error.message || "No se pudo cargar historial del cliente. Intenta nuevamente.", "error");
       setOrders([]);
       setDetailLoading(false);
       return;
@@ -102,6 +111,10 @@ export default function Clientes() {
     loadClientOrders(selectedClient?.id);
   }, [loadClientOrders, selectedClient?.id]);
 
+  useEffect(() => {
+    saveAdminPreference("clientes_filters", { search, sortBy, accountFilter });
+  }, [accountFilter, search, sortBy]);
+
   const ticketPromedio = useMemo(() => {
     const totalOrders = Number(selectedClient?.total_orders || 0);
     const totalSpent = Number(selectedClient?.total_spent || 0);
@@ -113,7 +126,7 @@ export default function Clientes() {
     setSyncing(true);
     const { data, error } = await supabase.rpc("rpc_backfill_customers_from_orders");
     if (error) {
-      showToast(error.message || "No se pudo sincronizar", "error");
+      showToast(error.message || "No se pudo sincronizar clientes. Intenta nuevamente.", "error");
       setSyncing(false);
       return;
     }
@@ -137,7 +150,7 @@ export default function Clientes() {
     <div style={{ display: "grid", gap: 14 }}>
       <Toast toast={toast} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-        <h2 style={{ margin: 0 }}>Clientes</h2>
+        <h2 style={{ margin: 0 }}>Clientes {loading && firstLoadDone ? "· Actualizando..." : ""}</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" style={secondaryBtn} onClick={() => loadClients()} disabled={loading}>Recargar</button>
           <button type="button" style={primaryBtn} onClick={runBackfill} disabled={syncing}>
@@ -175,7 +188,7 @@ export default function Clientes() {
 
       <div className="clientes-grid" style={layoutGrid}>
         <section style={cardStyle}>
-          {loading ? (
+          {loading && !firstLoadDone ? (
             <p>Cargando clientes...</p>
           ) : clients.length === 0 ? (
             <p>No hay clientes con los filtros actuales.</p>
