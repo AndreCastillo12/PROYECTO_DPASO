@@ -106,12 +106,15 @@ export default function AdminLayout() {
             <h2 style={{ textAlign: "center", margin: "12px 0 4px" }}>Admin</h2>
             {displayName && <span style={userNameStyle}>{displayName}</span>}
           </div>
-          <NavLink to="/platos" style={linkStyle}>Gestión de Platos</NavLink>
-          <NavLink to="/categorias" style={linkStyle}>Gestión de Categorías</NavLink>
-          <NavLink to="/pedidos" style={linkStyle}>Pedidos</NavLink>
-          <NavLink to="/tienda" style={linkStyle}>Horarios de atención</NavLink>
-          <NavLink to="/zonas-delivery" style={linkStyle}>Zonas delivery</NavLink>
-          <NavLink to="/perfil" style={linkStyle}>Perfil</NavLink>
+          <NavLink to="/platos" style={navLinkStyle}>Gestión de Platos</NavLink>
+          <NavLink to="/categorias" style={navLinkStyle}>Gestión de Categorías</NavLink>
+          <NavLink to="/pedidos" style={navLinkStyle}>Pedidos</NavLink>
+          <NavLink to="/clientes" style={navLinkStyle}>Clientes</NavLink>
+          <NavLink to="/tienda" style={navLinkStyle}>Horarios de atención</NavLink>
+          <NavLink to="/zonas-delivery" style={navLinkStyle}>Zonas delivery</NavLink>
+          <NavLink to="/caja" style={navLinkStyle}>Caja</NavLink>
+          <NavLink to="/reportes" style={navLinkStyle}>Reportes</NavLink>
+          <NavLink to="/perfil" style={navLinkStyle}>Perfil</NavLink>
         </div>
 
         <button onClick={cerrarSesion} style={logoutBtn}>Cerrar Sesión</button>
@@ -163,22 +166,31 @@ export default function AdminLayout() {
                 <span style={userNameStyle}>{displayName || "Usuario"}</span>
               </div>
             </div>
-            <NavLink to="/platos" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/platos" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
               Gestión de Platos
             </NavLink>
-            <NavLink to="/categorias" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/categorias" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
               Gestión de Categorías
             </NavLink>
-            <NavLink to="/pedidos" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/pedidos" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
               Pedidos
             </NavLink>
-            <NavLink to="/tienda" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/clientes" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
+              Clientes
+            </NavLink>
+            <NavLink to="/tienda" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
               Horarios de atención
             </NavLink>
-            <NavLink to="/zonas-delivery" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/zonas-delivery" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
               Zonas delivery
             </NavLink>
-            <NavLink to="/perfil" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/caja" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
+              Caja
+            </NavLink>
+            <NavLink to="/reportes" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
+              Reportes
+            </NavLink>
+            <NavLink to="/perfil" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
               Perfil
             </NavLink>
 
@@ -213,7 +225,7 @@ export default function AdminLayout() {
   );
 }
 
-const linkStyle = {
+const baseLinkStyle = {
   display: "block",
   margin: "10px 0",
   color: "#fff",
@@ -222,6 +234,15 @@ const linkStyle = {
   borderRadius: "6px",
   transition: "background 0.2s",
 };
+
+const activeLinkStyle = {
+  backgroundColor: "rgba(255,255,255,0.18)",
+  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.22)",
+};
+
+function navLinkStyle({ isActive }) {
+  return isActive ? { ...baseLinkStyle, ...activeLinkStyle } : baseLinkStyle;
+}
 
 const logoutBtn = {
   width: "100%",
