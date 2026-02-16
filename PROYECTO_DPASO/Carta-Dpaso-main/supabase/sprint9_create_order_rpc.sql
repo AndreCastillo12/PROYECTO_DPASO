@@ -15,6 +15,42 @@ alter table if exists public.orders
 alter table if exists public.orders
   alter column estado set default 'pending';
 
+alter table if exists public.orders
+  add column if not exists short_code text;
+
+create unique index if not exists orders_short_code_uidx on public.orders(short_code);
+
+create table if not exists public.customers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  phone text not null,
+  normalized_phone text,
+  total_orders integer not null default 0,
+  total_spent numeric(12,2) not null default 0,
+  last_order_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop index if exists public.customers_phone_uidx;
+create unique index if not exists customers_guest_phone_uidx on public.customers(phone) where auth_user_id is null;
+
+alter table if exists public.orders
+  add column if not exists customer_id uuid references public.customers(id),
+  add column if not exists auth_user_id uuid references auth.users(id);
+
+create index if not exists orders_customer_id_idx on public.orders(customer_id);
+create index if not exists orders_auth_user_id_idx on public.orders(auth_user_id);
+
+alter table if exists public.customers
+  add column if not exists auth_user_id uuid references auth.users(id),
+  add column if not exists email text,
+  add column if not exists dni text,
+  add column if not exists account_type text not null default 'guest';
+
+create unique index if not exists customers_auth_user_uidx on public.customers(auth_user_id) where auth_user_id is not null;
+create unique index if not exists customers_dni_uidx on public.customers(dni) where dni is not null;
+
 do $$
 begin
   if not exists (
@@ -74,6 +110,9 @@ declare
   v_total numeric;
 
   v_order_id uuid;
+  v_customer_id uuid;
+  v_auth_uid uuid;
+  v_customer_email text;
   v_short_id text;
   v_created_at timestamptz;
 
@@ -85,10 +124,18 @@ declare
   v_item_subtotal numeric;
   v_items_subtotal_calc numeric := 0;
   v_has_zone boolean := false;
+
+  v_plato_nombre_actual text;
+  v_plato_available boolean;
+  v_plato_track_stock boolean;
+  v_plato_stock integer;
+  v_plato_ref text;
 begin
   if payload is null or pg_catalog.jsonb_typeof(payload) <> 'object' then
     raise exception 'Payload inválido';
   end if;
+
+  v_auth_uid := auth.uid();
 
   v_customer := payload -> 'customer';
   v_items := payload -> 'items';
@@ -112,6 +159,7 @@ begin
   v_modalidad := pg_catalog.btrim(coalesce(v_customer ->> 'modalidad', ''));
   v_address := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'address', '')), '');
   v_referencia := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'referencia', '')), '');
+  v_customer_email := nullif(pg_catalog.btrim(pg_catalog.lower(coalesce(v_customer ->> 'email', ''))), '');
   v_provincia := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'provincia', '')), '');
   v_distrito := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'distrito', '')), '');
 
@@ -178,6 +226,61 @@ begin
     end if;
   end if;
 
+  if v_auth_uid is not null then
+    select c.id
+    into v_customer_id
+    from public.customers c
+    where c.auth_user_id = v_auth_uid
+    for update;
+
+    if v_customer_id is null then
+      insert into public.customers(name, phone, normalized_phone, auth_user_id, email, account_type)
+      values (
+        v_name,
+        v_phone,
+        nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
+        v_auth_uid,
+        v_customer_email,
+        'registered'
+      )
+      returning id into v_customer_id;
+    else
+      -- Para clientes registrados NO sobrescribimos perfil con los datos del pedido.
+      -- El pedido puede ser para otra persona (destinatario distinto al titular de la cuenta).
+      update public.customers c
+      set
+        email = coalesce(v_customer_email, c.email),
+        account_type = 'registered',
+        updated_at = now()
+      where c.id = v_customer_id;
+    end if;
+  else
+    select c.id
+    into v_customer_id
+    from public.customers c
+    where c.phone = v_phone
+      and c.auth_user_id is null
+    for update;
+
+    if v_customer_id is null then
+      insert into public.customers(name, phone, normalized_phone, account_type)
+      values (
+        v_name,
+        v_phone,
+        nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
+        'guest'
+      )
+      returning id into v_customer_id;
+    else
+      update public.customers
+      set
+        name = v_name,
+        normalized_phone = nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
+        updated_at = now()
+      where id = v_customer_id;
+    end if;
+  end if;
+
   insert into public.orders (
     nombre_cliente,
     telefono,
@@ -189,7 +292,10 @@ begin
     delivery_fee,
     total,
     provincia,
-    distrito
+    distrito,
+    customer_id,
+    auth_user_id,
+    short_code
   ) values (
     v_name,
     v_phone,
@@ -201,7 +307,10 @@ begin
     pg_catalog.round(v_delivery_fee, 2),
     pg_catalog.round(v_total, 2),
     v_provincia,
-    v_distrito
+    v_distrito,
+    v_customer_id,
+    v_auth_uid,
+    v_short_id
   )
   returning id, created_at into v_order_id, v_created_at;
 
@@ -236,8 +345,47 @@ begin
       raise exception 'item.qty debe ser mayor a 0';
     end if;
 
+    select
+      p.nombre,
+      p.is_available,
+      p.track_stock,
+      p.stock
+    into
+      v_plato_nombre_actual,
+      v_plato_available,
+      v_plato_track_stock,
+      v_plato_stock
+    from public.platos p
+    where p.id = v_plato_id
+    for update;
+
+    if not found then
+      raise exception 'NOT_FOUND: %', v_plato_id;
+    end if;
+
+    v_plato_ref := lower(regexp_replace(coalesce(v_plato_nombre_actual, v_plato_id::text), '[^a-zA-Z0-9]+', '_', 'g'));
+
+    if v_plato_available is not true then
+      raise exception 'NOT_AVAILABLE: %', v_plato_ref;
+    end if;
+
+    if v_plato_track_stock is true and coalesce(v_plato_stock, 0) < v_item_qty then
+      raise exception 'OUT_OF_STOCK: %', v_plato_ref;
+    end if;
+
     v_item_subtotal := pg_catalog.round((v_item_price * v_item_qty)::numeric, 2);
     v_items_subtotal_calc := v_items_subtotal_calc + v_item_subtotal;
+
+    if v_plato_track_stock is true then
+      update public.platos
+      set stock = coalesce(stock, 0) - v_item_qty
+      where id = v_plato_id
+        and coalesce(stock, 0) >= v_item_qty;
+
+      if not found then
+        raise exception 'OUT_OF_STOCK: %', v_plato_ref;
+      end if;
+    end if;
 
     insert into public.order_items (
       order_id,
@@ -260,11 +408,50 @@ begin
     raise exception 'subtotal no coincide con la suma de items';
   end if;
 
-  v_short_id := pg_catalog.substring(pg_catalog.replace(v_order_id::text, '-', ''), 1, 8);
+  v_short_id := pg_catalog.upper(pg_catalog.substring(pg_catalog.replace(v_order_id::text, '-', ''), 1, 8));
+
+  update public.orders
+  set short_code = v_short_id
+  where id = v_order_id;
+
+  update public.customers c
+  set
+    name = case
+      when c.auth_user_id is null then coalesce(
+        (
+          select nullif(pg_catalog.btrim(coalesce(o2.nombre_cliente, '')), '')
+          from public.orders o2
+          where o2.customer_id = v_customer_id
+            and nullif(pg_catalog.btrim(coalesce(o2.nombre_cliente, '')), '') is not null
+          order by o2.created_at desc
+          limit 1
+        ),
+        c.name
+      )
+      else c.name
+    end,
+    email = coalesce(v_customer_email, c.email),
+    account_type = case when c.auth_user_id is null then 'guest' else 'registered' end,
+    total_orders = coalesce(s.total_orders, 0),
+    total_spent = coalesce(s.total_spent, 0),
+    last_order_at = s.last_order_at,
+    updated_at = now()
+  from (
+    select
+      o.customer_id,
+      count(*)::int as total_orders,
+      coalesce(sum(o.total), 0)::numeric(12,2) as total_spent,
+      max(o.created_at) as last_order_at
+    from public.orders o
+    where o.customer_id = v_customer_id
+    group by o.customer_id
+  ) s
+  where c.id = s.customer_id;
 
   return pg_catalog.jsonb_build_object(
     'order_id', v_order_id,
     'short_id', v_short_id,
+    'short_code', v_short_id,
     'created_at', v_created_at
   );
 end;
