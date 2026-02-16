@@ -28,6 +28,16 @@
   <span id="cart-badge" class="cart-badge">0</span>
 </button>
 
+<button id="tracking-float-btn" class="tracking-float" type="button" aria-label="Rastrear pedido">
+  <span class="tracking-float-icon">🛵</span>
+  <span>Rastrear pedido</span>
+</button>
+
+<button id="auth-float-btn" class="auth-float" type="button" aria-label="Cuenta">
+  <span id="auth-float-icon">👤</span>
+  <span id="auth-float-label">Ingresar</span>
+</button>
+
 <!-- MODAL CARRITO/CHECKOUT -->
 <div id="cart-modal" class="cart-modal" aria-hidden="true">
   <div class="cart-modal-content">
@@ -53,6 +63,7 @@
       <strong id="cart-total">S/ 0.00</strong>
     </div>
 
+    <p id="cart-availability-note" class="cart-availability-note" style="display:none;"></p>
 
     <button id="go-checkout-btn" class="go-checkout-btn" type="button" style="display:none;">Continuar con tus datos</button>
 
@@ -127,6 +138,7 @@
     </div>
     <div class="receipt-actions">
       <button id="download-receipt-btn" class="receipt-download-btn" type="button">Descargar comprobante (PDF)</button>
+      <button id="btnVerEstadoPedido" class="receipt-track-btn" type="button" style="display:none;">Ver estado de mi pedido</button>
       <a id="receipt-whatsapp-btn" class="checkout-whatsapp" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Enviar por WhatsApp</a>
     </div>
   </div>
@@ -154,6 +166,7 @@
 
 <footer>
   <p>📍 Mz WI Lt. 37, Calle 46 San Antonio de Carapongo</p>
+  <p><a href="#" id="btnTracking" class="tracking-link">Rastrear pedido</a></p>
   <div class="socials">
     <a href="https://www.facebook.com/profile.php?id=61575799342894" target="_blank" rel="noopener noreferrer">
       <img src="images/Logos/facebook.png" alt="Facebook">
@@ -166,6 +179,69 @@
     </a>
   </div>
 </footer>
+
+<div id="trackingModal" class="tracking-modal" aria-hidden="true">
+  <div class="tracking-modal-card">
+    <h3>Rastrear pedido</h3>
+    <p class="tracking-muted">Ingresa tu código (ej: DP-AB12CD)</p>
+
+    <input id="trackingCode" type="text" placeholder="Código de pedido" />
+
+    <div class="tracking-row">
+      <button id="trackingSearchBtn" class="tracking-btn tracking-primary" type="button">Buscar</button>
+      <button id="trackingRefreshBtn" class="tracking-btn tracking-ghost" type="button" disabled>Actualizar</button>
+    </div>
+
+    <button id="trackingLastBtn" class="tracking-btn tracking-ghost tracking-full" type="button" style="display:none;">Ver último pedido</button>
+
+    <div id="trackingResult" class="tracking-result"></div>
+
+    <button id="trackingCloseBtn" class="tracking-btn tracking-danger tracking-full" type="button">Cerrar</button>
+  </div>
+</div>
+
+
+<div id="authModal" class="tracking-modal" aria-hidden="true">
+  <div class="tracking-modal-card">
+    <h3>Mi cuenta</h3>
+    <p id="authWelcome" class="tracking-muted">Compra como invitado o ingresa para ver tu historial.</p>
+
+    <div id="authLoggedOutView">
+      <input id="authName" type="text" placeholder="Nombre para registro" />
+      <input id="authPhone" type="tel" placeholder="Teléfono (9 dígitos)" />
+      <input id="authEmail" type="email" placeholder="Correo" />
+      <input id="authPassword" type="password" placeholder="Contraseña" />
+      <div class="tracking-row">
+        <button id="authLoginBtn" class="tracking-btn tracking-primary" type="button">Ingresar</button>
+        <button id="authRegisterBtn" class="tracking-btn tracking-ghost" type="button">Crear cuenta</button>
+      </div>
+      <div class="tracking-row">
+        <button id="authGoogleBtn" class="tracking-btn tracking-ghost" type="button">Google</button>
+        <button id="authResetBtn" class="tracking-btn tracking-ghost" type="button">Recuperar clave</button>
+      </div>
+      <p class="auth-note">Si no te llega el correo, revisa spam/promociones. Puedes seguir comprando como invitado.</p>
+    </div>
+
+    <div id="authLoggedInView" style="display:none;">
+      <p id="authUserInfo" class="tracking-muted"></p>
+      <div class="tracking-row">
+        <button id="authMyOrdersBtn" class="tracking-btn tracking-primary" type="button">Mis pedidos</button>
+        <button id="authLogoutBtn" class="tracking-btn tracking-ghost" type="button">Cerrar sesión</button>
+      </div>
+    </div>
+
+    <p id="authFeedback" class="checkout-feedback"></p>
+    <button id="authCloseBtn" class="tracking-btn tracking-danger tracking-full" type="button">Cerrar</button>
+  </div>
+</div>
+
+<div id="myOrdersModal" class="tracking-modal" aria-hidden="true">
+  <div class="tracking-modal-card">
+    <h3>Mis pedidos</h3>
+    <div id="myOrdersResult" class="tracking-result"></div>
+    <button id="myOrdersCloseBtn" class="tracking-btn tracking-danger tracking-full" type="button">Cerrar</button>
+  </div>
+</div>
 
 <!-- SUPABASE SDK -->
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
