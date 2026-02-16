@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
+import { logTelemetryEvent } from "../utils/telemetry";
 function money(value) {
   return `S/ ${Number(value || 0).toFixed(2)}`;
 }
@@ -82,6 +83,7 @@ export default function Caja() {
       .limit(1)
       .maybeSingle();
     if (error) {
+      logTelemetryEvent({ level: "error", area: "caja", event: "load_open_session_failed", message: error.message || "No se pudo cargar caja", meta: { code: error.code } });
       showToast("No se pudo cargar caja", "error");
       setLoading(false);
       return;
@@ -96,6 +98,7 @@ export default function Caja() {
       .order("opened_at", { ascending: false })
       .limit(20);
     if (error) {
+      logTelemetryEvent({ level: "error", area: "caja", event: "load_history_failed", message: error.message || "No se pudo cargar historial", meta: { code: error.code } });
       showToast("No se pudo cargar historial", "error");
       return;
     }
@@ -112,6 +115,7 @@ export default function Caja() {
       .eq("cash_session_id", sessionId)
       .order("created_at", { ascending: false });
     if (error) {
+      logTelemetryEvent({ level: "error", area: "caja", event: "load_movements_failed", message: error.message || "No se pudo cargar movimientos", meta: { code: error.code, sessionId } });
       showToast("No se pudo cargar movimientos", "error");
       return;
     }
@@ -124,6 +128,7 @@ export default function Caja() {
     }
     const { data, error } = await supabase.rpc("rpc_cash_summary", { session_id: sessionId });
     if (error) {
+      logTelemetryEvent({ level: "error", area: "caja", event: "load_summary_failed", message: error.message || "No se pudo cargar resumen", meta: { code: error.code, sessionId } });
       showToast("No se pudo cargar resumen", "error");
       return;
     }
