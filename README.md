@@ -45,7 +45,7 @@ Se agregó una entidad `customers` para normalizar clientes por teléfono y vinc
 
 ## Roadmap propuesto — próximos sprints
 
-### Sprint 16 — Estado operativo (Semáforo)
+### Sprint 17 — Estado operativo (Semáforo)
 - Implementar una vista de estado general por módulo: **Carta**, **Admin**, **Base de datos**, **Deploy**.
 - Mostrar indicadores visuales tipo semáforo:
   - 🟢 Listo
@@ -54,22 +54,22 @@ Se agregó una entidad `customers` para normalizar clientes por teléfono y vinc
 - Definir checklist mínimo por módulo (criterios para cambiar de color).
 - Publicar resumen semanal para facilitar seguimiento del avance.
 
-### Sprint 17 — Observabilidad y calidad
+### Sprint 18 — Observabilidad y calidad
 - Integrar logging estructurado para errores críticos (checkout, pedidos, auth, caja).
 - Crear tablero de métricas operativas: conversión, pedidos caídos, tiempo de respuesta RPC.
 - Añadir pruebas automáticas base para rutas críticas del admin y de la carta.
 
-### Sprint 18 — UX de operación diaria
+### Sprint 19 — UX de operación diaria
 - Mejorar tiempos de carga percibidos en Pedidos/Clientes/Reportes.
 - Unificar mensajes de error y éxito para todo el flujo operativo.
 - Mejorar filtros guardando preferencias del usuario admin (estado, fechas, orden).
 
-### Sprint 19 — Automatización comercial
+### Sprint 20 — Automatización comercial
 - Plantillas de WhatsApp para postventa (confirmación, seguimiento, reactivación).
 - Segmentación simple de clientes (frecuentes, inactivos, ticket alto).
 - Recordatorios automáticos para clientes sin recompra en ventana definida.
 
-### Sprint 20 — Cierre de ciclo y despliegue
+### Sprint 21 — Cierre de ciclo y despliegue
 - Auditoría final de RLS/policies para tablas sensibles.
 - Hardening de auth (review de redirects, expiración de sesión, recuperación).
 - Checklist de release y rollback para deploy seguro.
