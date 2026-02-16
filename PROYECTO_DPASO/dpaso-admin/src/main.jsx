@@ -12,6 +12,7 @@ import ZonasDelivery from "./pages/ZonasDelivery";
 import Caja from "./pages/Caja";
 import Reportes from "./pages/Reportes";
 import Clientes from "./pages/Clientes";
+import EstadoOperativo from "./pages/EstadoOperativo";
 import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -38,6 +39,7 @@ const router = createBrowserRouter([
       { path: "caja", element: <Caja /> }, // /caja
       { path: "reportes", element: <Reportes /> }, // /reportes
       { path: "clientes", element: <Clientes /> }, // /clientes
+      { path: "estado-operativo", element: <EstadoOperativo /> }, // /estado-operativo
     ],
   },
 

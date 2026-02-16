@@ -110,6 +110,7 @@ export default function AdminLayout() {
           <NavLink to="/categorias" style={navLinkStyle}>Gestión de Categorías</NavLink>
           <NavLink to="/pedidos" style={navLinkStyle}>Pedidos</NavLink>
           <NavLink to="/clientes" style={navLinkStyle}>Clientes</NavLink>
+          <NavLink to="/estado-operativo" style={navLinkStyle}>Estado operativo</NavLink>
           <NavLink to="/tienda" style={navLinkStyle}>Horarios de atención</NavLink>
           <NavLink to="/zonas-delivery" style={navLinkStyle}>Zonas delivery</NavLink>
           <NavLink to="/caja" style={navLinkStyle}>Caja</NavLink>
@@ -177,6 +178,9 @@ export default function AdminLayout() {
             </NavLink>
             <NavLink to="/clientes" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
               Clientes
+            </NavLink>
+            <NavLink to="/estado-operativo" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
+              Estado operativo
             </NavLink>
             <NavLink to="/tienda" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
               Horarios de atención
