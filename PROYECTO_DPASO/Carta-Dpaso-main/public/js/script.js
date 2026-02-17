@@ -43,6 +43,10 @@ const menuRowControllers = new Set();
 const uiBusyOps = new Set();
 let topbarShortcutsReady = false;
 let authInitReady = false;
+let authSessionRefreshInFlight = null;
+let authSessionRefreshLastAt = 0;
+let authSessionRefreshFailedAt = 0;
+let authSessionRefreshLastError = '';
 let trackingEventsReady = false;
 let cartModalEventsReady = false;
 let menuSearchReady = false;
@@ -53,7 +57,29 @@ let menuSearchDebounceId = null;
 let avatarPreviewUrl = '';
 let runtimeGuardsReady = false;
 const appUtils = window.DPASO_UTILS || null;
+const criticalUtils = window.DPASO_CRITICAL || {};
+const cartAvailabilityUtils = window.DPASO_CART_AVAIL || {};
 const diagnostics = { listenerBindings: new Map(), setupCalls: new Map(), requestCounts: new Map(), lastLogAt: 0 };
+let cartAvailabilityState = 'idle';
+let cartAvailabilityInFlight = null;
+
+
+const runMeasuredOperation = criticalUtils.runMeasuredOperation
+  || (async (name, action, opts = {}) => action({ signal: null, name, opts }));
+
+const hasUnlimitedStock = cartAvailabilityUtils.hasUnlimitedStock
+  || ((plato) => !(plato?.track_stock === true));
+
+const isPlatoSoldOut = cartAvailabilityUtils.isPlatoSoldOut
+  || ((plato) => Boolean(plato?.is_available === false));
+
+function getPlatoAvailabilityMessage(plato) {
+  const helper = cartAvailabilityUtils.getPlatoAvailabilityMessage;
+  if (typeof helper === 'function') return helper(plato, cartAvailabilityState);
+  if (!plato) return cartAvailabilityState === 'loading' ? 'Validando disponibilidad...' : '';
+  if (plato?.is_available === false) return 'No disponible por el momento';
+  return '';
+}
 
 function getAuthRedirectUrl() {
   return `${window.location.origin}${window.location.pathname}`;
@@ -61,6 +87,34 @@ function getAuthRedirectUrl() {
 
 function getRecoveryRedirectUrl() {
   return `${getAuthRedirectUrl()}?mode=recovery`;
+}
+
+
+const modalFocusState = new WeakMap();
+
+function openModalA11y(modal, { focusTarget = null } = {}) {
+  if (!modal) return;
+  modalFocusState.set(modal, document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  modal.classList.add('open');
+  modal.removeAttribute('inert');
+  modal.setAttribute('aria-hidden', 'false');
+  if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+}
+
+function closeModalA11y(modal, { fallbackFocus = null } = {}) {
+  if (!modal) return;
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && modal.contains(active)) {
+    const restore = fallbackFocus || modalFocusState.get(modal) || document.getElementById('nav-cart-btn') || document.body;
+    if (restore instanceof HTMLElement && typeof restore.focus === 'function') {
+      restore.focus();
+    } else if (document.body && typeof document.body.focus === 'function') {
+      document.body.focus();
+    }
+  }
+  modal.classList.remove('open');
+  modal.setAttribute('inert', '');
+  modal.setAttribute('aria-hidden', 'true');
 }
 
 function isTransientRequestError(error) {
@@ -145,31 +199,41 @@ function logDiagnostics(reason = '') {
     activeMenuCarousels: menuRowControllers.size,
     trackingIntervalActive: Boolean(trackingIntervalId),
     keepAliveIntervalActive: Boolean(keepAliveIntervalId),
-    busyOps: Array.from(uiBusyOps.values())
+    busyOps: Array.from(uiBusyOps.values()),
+    cartAvailabilityState,
+    inFlight: Object.fromEntries((appUtils?.state?.inFlightOps || new Map()).entries())
   });
 }
 
 async function runCriticalUiAction(opKey, action, { onError, timeoutMs = 15000, timeoutMessage = 'La operación tardó demasiado.' } = {}) {
-  if (appUtils?.runCriticalAction) {
-    return appUtils.runCriticalAction(opKey, async ({ signal }) => {
-      return runRequestWithPolicy(() => action({ signal }), { timeoutMs, timeoutMessage, retries: 0 });
-    }, {
-      busySet: uiBusyOps,
-      timeoutMs,
-      onError
-    });
-  }
+  return runMeasuredOperation(opKey, async ({ signal }) => {
+    if (appUtils?.runCriticalAction) {
+      return appUtils.runCriticalAction(opKey, ({ signal: guardSignal }) => {
+        const activeSignal = guardSignal || signal;
+        return action({ signal: activeSignal });
+      }, {
+        busySet: uiBusyOps,
+        timeoutMs,
+        onError
+      });
+    }
 
-  if (!beginUiOp(opKey)) return { skipped: true };
-  try {
-    return await runRequestWithPolicy(() => action({ signal: null }), { timeoutMs, timeoutMessage, retries: 0 });
-  } catch (error) {
-    if (typeof onError === 'function') onError(error);
-    else throw error;
-    return null;
-  } finally {
-    endUiOp(opKey);
-  }
+    if (!beginUiOp(opKey)) return { skipped: true };
+    try {
+      return await action({ signal });
+    } finally {
+      endUiOp(opKey);
+    }
+  }, {
+    timeoutMs,
+    timeoutMessage
+  }).catch((error) => {
+    if (typeof onError === 'function') {
+      onError(error);
+      return null;
+    }
+    throw error;
+  });
 }
 
 
@@ -185,15 +249,49 @@ function buildFullName(firstName = '', lastName = '') {
   return `${String(firstName || '').trim()} ${String(lastName || '').trim()}`.trim();
 }
 
-async function refreshAuthSession() {
-  const { data } = await withTimeout(
-    supabaseClient.auth.getSession(),
-    9000,
-    'No se pudo validar la sesión. Revisa tu conexión.'
-  );
-  authSession = data?.session || null;
-  return authSession;
+async function refreshAuthSession({ force = false, tolerateErrors = false } = {}) {
+  const now = Date.now();
+  const cooldownMs = 15000;
+
+  if (!force && authSessionRefreshInFlight) return authSessionRefreshInFlight;
+  if (!force && authSession && (now - authSessionRefreshLastAt) < 1500) return authSession;
+
+  const inCooldown = !force && authSessionRefreshFailedAt && (now - authSessionRefreshFailedAt) < cooldownMs;
+  if (inCooldown) {
+    if (tolerateErrors && authSession?.user) return authSession;
+    throw new Error(authSessionRefreshLastError || 'No se pudo validar la sesión. Revisa tu conexión.');
+  }
+
+  authSessionRefreshInFlight = (async () => {
+    try {
+      const { data } = await withTimeout(
+        supabaseClient.auth.getSession(),
+        9000,
+        'No se pudo validar la sesión. Revisa tu conexión.'
+      );
+      authSession = data?.session || null;
+      authSessionRefreshLastAt = Date.now();
+      authSessionRefreshFailedAt = 0;
+      authSessionRefreshLastError = '';
+      return authSession;
+    } catch (error) {
+      authSessionRefreshFailedAt = Date.now();
+      authSessionRefreshLastError = String(error?.message || 'No se pudo validar la sesión. Revisa tu conexión.');
+      if (tolerateErrors && authSession?.user) {
+        if ((Date.now() - authSessionRefreshFailedAt) < 1200) {
+          console.warn('⚠️ refreshAuthSession fallback con sesión en memoria:', authSessionRefreshLastError);
+        }
+        return authSession;
+      }
+      throw error;
+    } finally {
+      authSessionRefreshInFlight = null;
+    }
+  })();
+
+  return authSessionRefreshInFlight;
 }
+
 
 function isAuthSessionError(error) {
   const code = String(error?.code || '').toUpperCase();
@@ -393,20 +491,6 @@ function showCartToast(message) {
   }, 1800);
 }
 
-function isPlatoSoldOut(plato) {
-  if (!plato) return true;
-  if (plato.is_available === false) return true;
-  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return true;
-  return false;
-}
-
-function getPlatoAvailabilityMessage(plato) {
-  if (!plato) return 'No disponible';
-  if (plato.is_available === false) return 'No disponible por el momento';
-  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return 'Agotado';
-  return '';
-}
-
 function getUnavailableCartItems() {
   return cart.filter((item) => {
     const plato = platosState.get(item.id);
@@ -486,10 +570,8 @@ function openTrackingModal(prefillCode = '') {
 
   const codeToUse = normalizeTrackingCode(prefillCode) || getLastTrackingCode();
 
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
+  openModalA11y(modal, { focusTarget: input });
   if (codeToUse) input.value = codeToUse;
-  input.focus();
   refreshTrackingLastButton();
 
   if (codeToUse && prefillCode) {
@@ -500,8 +582,7 @@ function openTrackingModal(prefillCode = '') {
 function closeTrackingModal() {
   const modal = document.getElementById('trackingModal');
   if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
+  closeModalA11y(modal, { fallbackFocus: document.getElementById('nav-tracking-btn') });
   stopTrackingAutoRefresh();
 }
 
@@ -1002,15 +1083,13 @@ function buildWhatsAppMessage(orderData) {
 function openReceiptModal() {
   const modal = document.getElementById('receipt-modal');
   if (!modal) return;
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
+  openModalA11y(modal, { focusTarget: document.getElementById('receipt-close-btn') });
 }
 
 function closeReceiptModal() {
   const modal = document.getElementById('receipt-modal');
   if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
+  closeModalA11y(modal, { fallbackFocus: document.getElementById('nav-cart-btn') || document.getElementById('cart-float-btn') });
 }
 
 function renderReceipt(orderData) {
@@ -1154,34 +1233,52 @@ function updateCartBadge() {
   if (navBadge) navBadge.textContent = count;
 }
 
-async function refreshCartAvailability() {
+async function refreshCartAvailability({ force = false } = {}) {
+  if (cartAvailabilityInFlight) return cartAvailabilityInFlight;
+
   const ids = [...new Set(cart.map((item) => item.id).filter(Boolean))];
-  if (!ids.length) return;
+  if (!ids.length) {
+    cartAvailabilityState = 'ready';
+    return;
+  }
 
   markRequest('cart:availability');
+  cartAvailabilityState = 'loading';
 
-  const { data, error } = await withTimeout(
-    supabaseClient
+  cartAvailabilityInFlight = runMeasuredOperation('cart:availability', async ({ signal }) => {
+    const { data, error } = await supabaseClient
       .from('platos')
       .select('id,is_available,track_stock,stock,precio')
-      .in('id', ids),
-    8000,
-    'No se pudo validar disponibilidad del carrito.'
-  );
+      .in('id', ids)
+      .abortSignal(signal);
 
-  if (error) throw error;
+    if (error) throw error;
 
-  (data || []).forEach((row) => {
-    const prev = platosState.get(row.id) || {};
-    platosState.set(row.id, { ...prev, ...row });
+    const rows = data || [];
+    rows.forEach((row) => {
+      const prev = platosState.get(row.id) || {};
+      platosState.set(row.id, { ...prev, ...row });
+    });
+
+    cart = cart.map((item) => {
+      const latest = rows.find((row) => row.id === item.id);
+      if (!latest) return item;
+      return { ...item, precio: Number(latest.precio ?? item.precio) };
+    });
+    saveCart();
+    cartAvailabilityState = 'ready';
+    return rows;
+  }, {
+    timeoutMs: 9000,
+    timeoutMessage: 'No se pudo validar disponibilidad del carrito.'
+  }).catch((error) => {
+    cartAvailabilityState = 'error';
+    throw error;
+  }).finally(() => {
+    cartAvailabilityInFlight = null;
   });
 
-  cart = cart.map((item) => {
-    const latest = (data || []).find((row) => row.id === item.id);
-    if (!latest) return item;
-    return { ...item, precio: Number(latest.precio ?? item.precio) };
-  });
-  saveCart();
+  return cartAvailabilityInFlight;
 }
 
 function addToCart(item) {
@@ -1193,9 +1290,9 @@ function addToCart(item) {
 
   const found = cart.find(x => x.id === item.id);
 
-  if (found && platoState?.track_stock === true) {
-    const maxStock = Number(platoState.stock ?? 0);
-    if (found.cantidad >= maxStock) {
+  if (found && platoState?.track_stock === true && !hasUnlimitedStock(platoState)) {
+    const maxStock = Number(platoState.stock);
+    if (Number.isFinite(maxStock) && found.cantidad >= maxStock) {
       showCartToast(`⚠️ Solo quedan ${maxStock} de ${item.nombre}`);
       return;
     }
@@ -1228,9 +1325,9 @@ function changeCartQty(itemId, delta) {
     return;
   }
 
-  if (delta > 0 && platoState?.track_stock === true) {
-    const maxStock = Number(platoState.stock ?? 0);
-    if (item.cantidad >= maxStock) {
+  if (delta > 0 && platoState?.track_stock === true && !hasUnlimitedStock(platoState)) {
+    const maxStock = Number(platoState.stock);
+    if (Number.isFinite(maxStock) && item.cantidad >= maxStock) {
       showCartToast(`⚠️ Stock máximo alcanzado para ${item.nombre}`);
       return;
     }
@@ -1277,18 +1374,22 @@ function clearCartAndForm() {
 function openCartModal() {
   const modal = document.getElementById('cart-modal');
   if (!modal) return;
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
+  openModalA11y(modal, { focusTarget: document.getElementById('cart-close-btn') });
   getStoreSettings();
   getDeliveryZones();
-  refreshCartAvailability().then(() => renderCartModal());
+  renderCartModal();
+  refreshCartAvailability()
+    .then(() => renderCartModal())
+    .catch((error) => {
+      console.error('❌ Error validando carrito al abrir modal:', error);
+      renderCartModal();
+    });
 }
 
 function closeCartModal() {
   const modal = document.getElementById('cart-modal');
   if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
+  closeModalA11y(modal, { fallbackFocus: document.getElementById('nav-cart-btn') || document.getElementById('cart-float-btn') });
 }
 
 function renderCartModal() {
@@ -1393,7 +1494,7 @@ function setupCartModalEvents() {
   markSetupCall('cartModal');
   if (cartModalEventsReady) { logDiagnostics('setupCartModalEvents:skip-duplicate'); return; }
   cartModalEventsReady = true;
-  const cartButton = document.getElementById('cart-float-btn') || document.getElementById('nav-cart-btn');
+  const cartButton = document.getElementById('cart-float-btn');
   const closeButton = document.getElementById('cart-close-btn');
   const modal = document.getElementById('cart-modal');
   const itemsContainer = document.getElementById('cart-items');
@@ -1405,6 +1506,7 @@ function setupCartModalEvents() {
   const trackOrderBtn = document.getElementById('btnVerEstadoPedido');
 
   cartButton?.addEventListener('click', openCartModal);
+  if (cartButton) markBinding('cart:open-float');
   closeButton?.addEventListener('click', closeCartModal);
 
   modal?.addEventListener('click', (e) => {
@@ -1481,6 +1583,7 @@ function setupCartModalEvents() {
 
   document.getElementById('download-receipt-btn')?.addEventListener('click', () => downloadReceiptPdf(lastOrderData));
   document.getElementById('checkout-form')?.addEventListener('submit', submitOrder);
+  markBinding('checkout:submit');
 }
 
 
@@ -1492,9 +1595,16 @@ async function getCustomerProfileByAuth() {
     return null;
   }
 
-  const { data, error } = await supabaseClient.rpc('rpc_get_my_customer_profile');
-  if (error) {
+  const { data, error } = await runMeasuredOperation('auth:get-customer-profile', ({ signal }) => {
+    return supabaseClient.rpc('rpc_get_my_customer_profile').abortSignal(signal);
+  }, {
+    timeoutMs: 9000,
+    timeoutMessage: 'No se pudo cargar perfil de cliente en este momento.'
+  }).catch((error) => {
     console.warn('⚠️ No se pudo cargar perfil de cliente:', error?.message || error);
+    return { data: null, error };
+  });
+  if (error) {
     authProfile = null;
     return null;
   }
@@ -1708,8 +1818,7 @@ function updateAuthUi() {
 function openAuthModal() {
   const modal = document.getElementById('authModal');
   if (!modal) return;
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
+  openModalA11y(modal, { focusTarget: document.getElementById('authCloseBtn') });
 }
 
 function openAuthModalInMode(mode = 'login') {
@@ -1720,8 +1829,7 @@ function openAuthModalInMode(mode = 'login') {
 function closeAuthModal() {
   const modal = document.getElementById('authModal');
   if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
+  closeModalA11y(modal, { fallbackFocus: document.getElementById('nav-account-btn') });
   setAuthFeedback('');
 }
 
@@ -1736,18 +1844,16 @@ async function openMyOrdersModal() {
   setAccountSection('orders');
   result.innerHTML = '<p>Cargando tus pedidos...</p>';
 
-  try {
-    const session = await refreshAuthSession();
+  await runCriticalUiAction('my-orders', async ({ signal }) => {
+    const session = await refreshAuthSession({ tolerateErrors: true });
     if (!session?.user?.id) {
       result.innerHTML = '<p class="tracking-error">Tu sesión expiró. Inicia sesión nuevamente.</p>';
       return;
     }
 
-    const { data, error } = await withTimeout(
-      supabaseClient.rpc('rpc_my_orders'),
-      12000,
-      'No se pudo cargar tu historial. Intenta de nuevo.'
-    );
+    const { data, error } = await supabaseClient
+      .rpc('rpc_my_orders')
+      .abortSignal(signal);
 
     if (error) {
       result.innerHTML = `<p class="tracking-error">${error.message || 'No se pudo cargar historial.'}</p>`;
@@ -1766,10 +1872,15 @@ async function openMyOrdersModal() {
         <p>Pago: ${o.paid ? 'Sí' : 'No'} (${o.payment_method || 'sin definir'})</p>
       </div>
     `).join('');
-  } catch (error) {
-    result.innerHTML = `<p class="tracking-error">${friendlyRuntimeError(error, 'No se pudo cargar historial.')}</p>`;
-  }
+  }, {
+    timeoutMs: 12000,
+    timeoutMessage: 'No se pudo cargar tu historial. Intenta de nuevo.',
+    onError: (error) => {
+      result.innerHTML = `<p class="tracking-error">${friendlyRuntimeError(error, 'No se pudo cargar historial.')}</p>`;
+    }
+  });
 }
+
 
 async function handleResetPasswordUpdate() {
   const password = String(document.getElementById('authResetPassword')?.value || '').trim();
@@ -1801,7 +1912,7 @@ async function handleSaveProfile() {
   const saveBtn = document.getElementById('authProfileSaveBtn');
 
   try {
-    const session = await refreshAuthSession();
+    const session = await refreshAuthSession({ tolerateErrors: true });
     if (!session?.user?.id) {
       setAuthFeedback('Tu sesión expiró. Inicia sesión nuevamente.', 'error');
       return;
@@ -1899,7 +2010,7 @@ async function handleSaveProfile() {
       };
     }
 
-    await refreshAuthSession();
+    await refreshAuthSession({ force: true, tolerateErrors: true });
     clearAvatarPreview();
     const photoInput = document.getElementById('authProfilePhoto');
     if (photoInput) photoInput.value = '';
@@ -2062,51 +2173,49 @@ async function handleGoogleLogin() {
 }
 
 async function handleLogout() {
-  if (!beginUiOp('logout')) return;
   const logoutBtn = document.getElementById('authLogoutBtn');
   if (logoutBtn) logoutBtn.disabled = true;
-  let signOutError = null;
 
-  try {
-    const { error: globalError } = await withTimeout(
-      supabaseClient.auth.signOut({ scope: 'global' }),
-      12000,
-      'No se pudo cerrar sesión en este momento.'
-    );
+  await runCriticalUiAction('logout', async ({ signal }) => {
+    let signOutError = null;
 
-    if (globalError) {
-      const { error: localError } = await withTimeout(
-        supabaseClient.auth.signOut({ scope: 'local' }),
-        8000,
-        'No se pudo cerrar sesión local.'
-      );
-      signOutError = localError || globalError;
-    }
-  } catch (error) {
-    signOutError = error;
-  } finally {
-    authRecoveryMode = false;
-    authSession = null;
-    authProfile = null;
-    setAuthMode('login');
-    updateAuthUi();
-    closeMyOrdersModal();
+    try {
+      const { error: globalError } = await supabaseClient.auth.signOut({ scope: 'global' });
 
-    if (signOutError) {
-      setAuthFeedback(`Sesión local cerrada. ${friendlyRuntimeError(signOutError, friendlyAuthError(signOutError))}`, 'info');
-    } else {
+      if (globalError) {
+        const { error: localError } = await supabaseClient.auth.signOut({ scope: 'local' });
+        signOutError = localError || globalError;
+      }
+    } catch (error) {
+      signOutError = error;
+    } finally {
+      authRecoveryMode = false;
+      authSession = null;
+      authProfile = null;
       setAuthMode('login');
-      setAuthFeedback('Sesión cerrada ✅', 'success');
-    }
+      updateAuthUi();
+      closeMyOrdersModal();
 
-    if (logoutBtn) logoutBtn.disabled = false;
-    endUiOp('logout');
-  }
+      if (signOutError) {
+        setAuthFeedback(`Sesión local cerrada. ${friendlyRuntimeError(signOutError, friendlyAuthError(signOutError))}`, 'info');
+      } else {
+        setAuthMode('login');
+        setAuthFeedback('Sesión cerrada ✅', 'success');
+      }
+    }
+  }, {
+    timeoutMs: 12000,
+    timeoutMessage: 'No se pudo cerrar sesión en este momento.',
+    onError: (error) => setAuthFeedback(friendlyRuntimeError(error, 'No se pudo cerrar sesión en este momento.'), 'error')
+  });
+
+  if (logoutBtn) logoutBtn.disabled = false;
 }
 
 
 
 function registerGlobalEvents(refreshSessionOnWake) {
+  markSetupCall('globalEvents');
   const onVisibility = () => {
     if (!document.hidden) refreshSessionOnWake();
   };
@@ -2134,7 +2243,8 @@ function registerGlobalEvents(refreshSessionOnWake) {
 }
 
 async function initAuth() {
-  if (authInitReady) return;
+  markSetupCall('auth:init');
+  if (authInitReady) { logDiagnostics('initAuth:skip-duplicate'); return; }
   authInitReady = true;
 
   const authBtn = document.getElementById('auth-float-btn');
@@ -2156,23 +2266,29 @@ async function initAuth() {
   });
 
   authBtn?.addEventListener('click', openAuthModal);
+  if (authBtn) markBinding('auth:open-modal');
   authClose?.addEventListener('click', closeAuthModal);
+  if (authClose) markBinding('auth:close-modal');
   authModal?.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
 
   document.getElementById('authTabLogin')?.addEventListener('click', () => setAuthMode('login'));
   document.getElementById('authTabRegister')?.addEventListener('click', () => setAuthMode('register'));
   document.getElementById('authRegisterBtn')?.addEventListener('click', handleRegister);
   document.getElementById('authLoginBtn')?.addEventListener('click', handleLogin);
+  markBinding('auth:login');
   document.getElementById('authGoogleBtn')?.addEventListener('click', handleGoogleLogin);
   document.getElementById('authGoogleRegisterBtn')?.addEventListener('click', handleGoogleLogin);
   document.getElementById('authResetLink')?.addEventListener('click', handleResetPassword);
   document.getElementById('authResetSaveBtn')?.addEventListener('click', handleResetPasswordUpdate);
   document.getElementById('authLogoutBtn')?.addEventListener('click', handleLogout);
+  markBinding('auth:logout');
   document.getElementById('authMyOrdersBtn')?.addEventListener('click', openMyOrdersModal);
+  markBinding('auth:my-orders');
   document.getElementById('authEditProfileBtn')?.addEventListener('click', () => {
     setAccountSection('profile');
   });
   document.getElementById('authProfileSaveBtn')?.addEventListener('click', handleSaveProfile);
+  markBinding('auth:save-profile');
   document.getElementById('authProfilePhoto')?.addEventListener('change', handleProfilePhotoPreview);
 
   setAuthMode('login');
@@ -2212,7 +2328,7 @@ async function initAuth() {
     }
   }
 
-  await refreshAuthSession();
+  await refreshAuthSession({ tolerateErrors: true });
   await getCustomerProfileByAuth();
 
   if (isRecoveryLink) {
@@ -2237,7 +2353,7 @@ async function initAuth() {
 
   const refreshSessionOnWake = async () => {
     try {
-      await refreshAuthSession();
+      await refreshAuthSession({ tolerateErrors: true });
     } catch (error) {
       console.warn('⚠️ No se pudo refrescar sesión al volver de inactividad:', error?.message || error);
     } finally {
@@ -2256,7 +2372,12 @@ async function initAuth() {
   authSubscription?.subscription?.unsubscribe?.();
   authSubscription = supabaseClient.auth.onAuthStateChange(async (event, session) => {
     authSession = session || null;
-    await getCustomerProfileByAuth();
+    authSessionRefreshLastAt = Date.now();
+    try {
+      await getCustomerProfileByAuth();
+    } catch (error) {
+      console.warn('⚠️ onAuthStateChange profile load error:', error?.message || error);
+    }
 
     if (event === 'PASSWORD_RECOVERY') {
       authRecoveryMode = true;
@@ -2309,11 +2430,10 @@ async function submitOrder(event) {
     }
 
     try {
-      await withTimeout(
-        refreshCartAvailability(),
-        8000,
-        'No se pudo validar disponibilidad del carrito. Intenta nuevamente.'
-      );
+      await runMeasuredOperation('submit-order:availability-check', () => refreshCartAvailability(), {
+        timeoutMs: 9000,
+        timeoutMessage: 'No se pudo validar disponibilidad del carrito. Intenta nuevamente.'
+      });
     } catch (availabilityError) {
       showFeedback(friendlyRuntimeError(availabilityError, 'No se pudo validar disponibilidad del carrito.'), 'error');
       return;
@@ -2414,7 +2534,7 @@ async function submitOrder(event) {
 
     if (authSession?.user) {
       try {
-        await refreshAuthSession();
+        await refreshAuthSession({ tolerateErrors: true });
       } catch (error) {
         showFeedback(friendlyRuntimeError(error, 'No se pudo validar tu sesión. Inicia sesión nuevamente.'), 'error');
         return;
@@ -2456,11 +2576,12 @@ async function submitOrder(event) {
 
     console.log('📦 Payload RPC create_order:', getSafeOrderPayloadForLogs(rpcPayload));
 
-    let rpcResult = await withTimeout(
-      supabaseClient.rpc('create_order', { payload: rpcPayload }),
-      15000,
-      'No se pudo crear el pedido por tiempo de espera.'
-    );
+    let rpcResult = await runMeasuredOperation('submit-order:create-order', ({ signal }) => {
+      return supabaseClient.rpc('create_order', { payload: rpcPayload }).abortSignal(signal);
+    }, {
+      timeoutMs: 15000,
+      timeoutMessage: 'No se pudo crear el pedido por tiempo de espera.'
+    });
 
     if (rpcResult.error && isAuthSessionError(rpcResult.error) && authSession?.user) {
       const { data: refreshed, error: refreshError } = await supabaseClient.auth.refreshSession();
@@ -2468,11 +2589,12 @@ async function submitOrder(event) {
         throw rpcResult.error;
       }
       authSession = refreshed.session;
-      rpcResult = await withTimeout(
-        supabaseClient.rpc('create_order', { payload: rpcPayload }),
-        15000,
-        'No se pudo crear el pedido por tiempo de espera.'
-      );
+      rpcResult = await runMeasuredOperation('submit-order:create-order:retry', ({ signal }) => {
+        return supabaseClient.rpc('create_order', { payload: rpcPayload }).abortSignal(signal);
+      }, {
+        timeoutMs: 15000,
+        timeoutMessage: 'No se pudo crear el pedido por tiempo de espera.'
+      });
     }
 
     const { data: rpcData, error: rpcError } = rpcResult;
@@ -2544,8 +2666,13 @@ async function submitOrder(event) {
       submitBtn.disabled = false;
       submitBtn.textContent = 'Confirmar pedido';
     }
-    updateCartTotalsAndAvailability();
-    endUiOp('submit-order');
+    try {
+      updateCartTotalsAndAvailability();
+    } catch (finalizeError) {
+      console.error('❌ Error finalizando submit-order:', finalizeError);
+    } finally {
+      endUiOp('submit-order');
+    }
   }
 }
 
@@ -2915,6 +3042,7 @@ function setupTopbarShortcuts() {
 
   renderTopbarAccountMenu();
   navCartBtn?.addEventListener('click', openCartModal);
+  if (navCartBtn) markBinding('cart:open-topbar');
   navTrackingBtn?.addEventListener('click', () => openTrackingModal());
 
   navAccountBtn?.addEventListener('click', (e) => {
@@ -3144,8 +3272,10 @@ function setupRuntimeGuards() {
 }
 
 async function bootstrapAppCore() {
+  markSetupCall('bootstrap:core');
   setupRuntimeGuards();
   loadCart();
+  cartAvailabilityState = cart.length ? 'loading' : 'ready';
   updateDireccionRequired();
   updateCartBadge();
   renderCartModal();
@@ -3153,6 +3283,14 @@ async function bootstrapAppCore() {
   await getStoreSettings();
   await getDeliveryZones();
   await cargarMenu();
+
+  try {
+    await refreshCartAvailability();
+  } catch (error) {
+    console.error('❌ bootstrap cart availability failed:', error);
+  } finally {
+    renderCartModal();
+  }
 
   const loader = document.getElementById('loader');
   if (loader) setTimeout(() => loader.classList.add('hide'), 1500);
@@ -3171,6 +3309,8 @@ window.DPASO_APP = Object.assign(window.DPASO_APP || {}, {
     initCount: appUtils?.state?.initCount || 0,
     listenerCount: appUtils?.state?.listenerCount || 0,
     activeTimersCount: appUtils?.state?.timerCount || 0,
-    activeRafCount: appUtils?.state?.rafCount || 0
+    activeRafCount: appUtils?.state?.rafCount || 0,
+    cartAvailabilityState,
+    inFlight: Object.fromEntries((appUtils?.state?.inFlightOps || new Map()).entries())
   })
 });
