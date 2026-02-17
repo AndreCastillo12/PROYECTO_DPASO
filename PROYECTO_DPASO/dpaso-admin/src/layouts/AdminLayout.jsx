@@ -106,10 +106,13 @@ export default function AdminLayout() {
             <h2 style={{ textAlign: "center", margin: "12px 0 4px" }}>Admin</h2>
             {displayName && <span style={userNameStyle}>{displayName}</span>}
           </div>
+          <NavLink to="/dashboard" style={navLinkStyle}>Dashboard</NavLink>
           <NavLink to="/platos" style={navLinkStyle}>Gestión de Platos</NavLink>
           <NavLink to="/categorias" style={navLinkStyle}>Gestión de Categorías</NavLink>
           <NavLink to="/pedidos" style={navLinkStyle}>Pedidos</NavLink>
           <NavLink to="/clientes" style={navLinkStyle}>Clientes</NavLink>
+          <NavLink to="/estado-operativo" style={navLinkStyle}>Estado operativo</NavLink>
+          <NavLink to="/observabilidad" style={navLinkStyle}>Observabilidad</NavLink>
           <NavLink to="/tienda" style={navLinkStyle}>Horarios de atención</NavLink>
           <NavLink to="/zonas-delivery" style={navLinkStyle}>Zonas delivery</NavLink>
           <NavLink to="/caja" style={navLinkStyle}>Caja</NavLink>
@@ -166,6 +169,9 @@ export default function AdminLayout() {
                 <span style={userNameStyle}>{displayName || "Usuario"}</span>
               </div>
             </div>
+            <NavLink to="/dashboard" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
+              Dashboard
+            </NavLink>
             <NavLink to="/platos" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
               Gestión de Platos
             </NavLink>
@@ -177,6 +183,12 @@ export default function AdminLayout() {
             </NavLink>
             <NavLink to="/clientes" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
               Clientes
+            </NavLink>
+            <NavLink to="/estado-operativo" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
+              Estado operativo
+            </NavLink>
+            <NavLink to="/observabilidad" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
+              Observabilidad
             </NavLink>
             <NavLink to="/tienda" style={navLinkStyle} onClick={() => setMenuOpen(false)}>
               Horarios de atención

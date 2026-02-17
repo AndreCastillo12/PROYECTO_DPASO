@@ -77,6 +77,19 @@ async function refreshAuthSession() {
   return authSession;
 }
 
+function isAuthSessionError(error) {
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('jwt')
+    || message.includes('expired')
+    || message.includes('token')
+    || code === 'PGRST301'
+    || code === 'PGRST302'
+    || code === '42501'
+  );
+}
+
 function friendlyRuntimeError(error, fallback = 'No se pudo completar la acción.') {
   const msg = String(error?.message || '').trim();
   if (!msg) return fallback;
@@ -1807,6 +1820,20 @@ async function initAuth() {
 
   updateAuthUi();
 
+  const refreshSessionOnWake = async () => {
+    try {
+      await refreshAuthSession();
+    } catch (error) {
+      console.warn('⚠️ No se pudo refrescar sesión al volver de inactividad:', error?.message || error);
+    }
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshSessionOnWake();
+  });
+
+  window.addEventListener('focus', refreshSessionOnWake);
+
   if ((hasHashAccessToken || hasQueryAuthCode) && authSession?.user && !isRecoveryLink) {
     setAuthMode('login');
     setAuthFeedback('Sesión iniciada correctamente ✅', 'success');
@@ -2000,12 +2027,26 @@ async function submitOrder(event) {
 
     console.log('📦 Payload RPC create_order:', getSafeOrderPayloadForLogs(rpcPayload));
 
-    const { data: rpcData, error: rpcError } = await withTimeout(
+    let rpcResult = await withTimeout(
       supabaseClient.rpc('create_order', { payload: rpcPayload }),
       15000,
       'No se pudo crear el pedido por tiempo de espera.'
     );
 
+    if (rpcResult.error && isAuthSessionError(rpcResult.error) && authSession?.user) {
+      const { data: refreshed, error: refreshError } = await supabaseClient.auth.refreshSession();
+      if (refreshError || !refreshed?.session) {
+        throw rpcResult.error;
+      }
+      authSession = refreshed.session;
+      rpcResult = await withTimeout(
+        supabaseClient.rpc('create_order', { payload: rpcPayload }),
+        15000,
+        'No se pudo crear el pedido por tiempo de espera.'
+      );
+    }
+
+    const { data: rpcData, error: rpcError } = rpcResult;
     if (rpcError) throw rpcError;
 
     orderId = rpcData?.order_id || null;
