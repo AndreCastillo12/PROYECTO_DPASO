@@ -1817,6 +1817,7 @@ async function initAuth() {
   document.getElementById('authRegisterBtn')?.addEventListener('click', handleRegister);
   document.getElementById('authLoginBtn')?.addEventListener('click', handleLogin);
   document.getElementById('authGoogleBtn')?.addEventListener('click', handleGoogleLogin);
+  document.getElementById('authGoogleRegisterBtn')?.addEventListener('click', handleGoogleLogin);
   document.getElementById('authResetLink')?.addEventListener('click', handleResetPassword);
   document.getElementById('authResetSaveBtn')?.addEventListener('click', handleResetPasswordUpdate);
   document.getElementById('authLogoutBtn')?.addEventListener('click', handleLogout);
@@ -2227,6 +2228,74 @@ function setupMenuActiveNav(nav, sections = []) {
 }
 
 
+
+function setupMenuRowDragScroll(rows = []) {
+  rows.forEach((row) => {
+    if (!row) return;
+
+    let isPointerDown = false;
+    let lastPointerX = 0;
+
+    const getMaxScroll = () => Math.max(0, row.scrollWidth - row.clientWidth);
+
+    const normalizeCircularScroll = () => {
+      const maxScroll = getMaxScroll();
+      if (maxScroll <= 1) return;
+
+      while (row.scrollLeft < 0) row.scrollLeft += maxScroll;
+      while (row.scrollLeft > maxScroll) row.scrollLeft -= maxScroll;
+    };
+
+    row.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      isPointerDown = true;
+      row.dataset.dragging = 'false';
+      lastPointerX = event.clientX;
+      row.classList.add('dragging');
+      row.setPointerCapture?.(event.pointerId);
+    });
+
+    row.addEventListener('pointermove', (event) => {
+      if (!isPointerDown) return;
+
+      const deltaX = event.clientX - lastPointerX;
+      if (Math.abs(deltaX) > 2) row.dataset.dragging = 'true';
+
+      row.scrollLeft -= deltaX * 1.35;
+      normalizeCircularScroll();
+      lastPointerX = event.clientX;
+    });
+
+    const releaseDrag = () => {
+      if (!isPointerDown) return;
+      isPointerDown = false;
+      row.classList.remove('dragging');
+      window.setTimeout(() => { delete row.dataset.dragging; }, 80);
+    };
+
+    row.addEventListener('pointerup', releaseDrag);
+    row.addEventListener('pointercancel', releaseDrag);
+    row.addEventListener('pointerleave', releaseDrag);
+
+    row.addEventListener('click', (event) => {
+      if (row.dataset.dragging === 'true') {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, true);
+
+    row.addEventListener('wheel', (event) => {
+      // Permitir scroll vertical normal de la página cuando el usuario no pide desplazamiento horizontal.
+      if (!event.shiftKey && Math.abs(event.deltaY) > Math.abs(event.deltaX)) return;
+
+      const horizontalDelta = Math.abs(event.deltaX) > 0 ? event.deltaX : event.deltaY;
+      row.scrollLeft += horizontalDelta * 1.1;
+      normalizeCircularScroll();
+      event.preventDefault();
+    }, { passive: false });
+  });
+}
+
 function openPlatoModal(item, imageUrl, soldOut = false) {
   const modal = document.getElementById('platoModal');
   const name = document.getElementById('platoModalName');
@@ -2272,7 +2341,67 @@ function setupMenuSearch() {
   const input = document.getElementById('menuSearchInput');
   if (!input) return;
 
+  let userTypedSearch = false;
+
+  const clearSearchInput = () => {
+    if (!input.value) return false;
+    input.value = '';
+    return true;
+  };
+
+  const unlockSearchInput = () => {
+    if (!input.hasAttribute('readonly')) return;
+    input.removeAttribute('readonly');
+  };
+
+  const lockSearchInput = () => {
+    input.setAttribute('readonly', 'readonly');
+  };
+
+  const clearIfLooksLikeAutofill = () => {
+    if (userTypedSearch) return;
+    const value = String(input.value || '').trim();
+    if (!value) return;
+
+    const looksLikeCredential = value.includes('@') || value.includes('gmail.com') || value.includes('hotmail.com') || value.length > 24;
+    if (looksLikeCredential || document.activeElement !== input) {
+      clearSearchInput();
+      cargarMenu();
+    }
+  };
+
+  lockSearchInput();
+  clearSearchInput();
+  window.setTimeout(clearSearchInput, 120);
+  window.setTimeout(clearIfLooksLikeAutofill, 500);
+  window.setTimeout(clearIfLooksLikeAutofill, 1200);
+  window.setTimeout(clearIfLooksLikeAutofill, 2200);
+
+  // Algunos gestores/autofill inyectan después del load; vigilamos y limpiamos solo si parece credencial.
+  window.setInterval(() => {
+    clearIfLooksLikeAutofill();
+  }, 900);
+
+  window.addEventListener('pageshow', () => {
+    userTypedSearch = false;
+    lockSearchInput();
+    clearSearchInput();
+  });
+
+  input.addEventListener('focus', () => {
+    unlockSearchInput();
+    clearIfLooksLikeAutofill();
+  });
+
+  input.addEventListener('pointerdown', unlockSearchInput);
+  input.addEventListener('keydown', unlockSearchInput);
+
+  input.addEventListener('blur', () => {
+    if (!input.value) lockSearchInput();
+  });
+
   input.addEventListener('input', () => {
+    userTypedSearch = true;
     cargarMenu();
   });
 
@@ -2283,6 +2412,7 @@ function setupMenuSearch() {
     document.getElementById('menu')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
+
 
 function setupTopbarShortcuts() {
   const navCartBtn = document.getElementById('nav-cart-btn');
@@ -2424,6 +2554,9 @@ async function cargarMenu() {
 
     const sectionTitles = Array.from(menu.querySelectorAll('.section-title'));
     setupMenuActiveNav(nav, sectionTitles);
+
+    const menuRows = Array.from(menu.querySelectorAll('.menu-row'));
+    setupMenuRowDragScroll(menuRows);
 
     document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
   } catch (err) {
