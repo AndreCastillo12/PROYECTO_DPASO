@@ -1817,6 +1817,7 @@ async function initAuth() {
   document.getElementById('authRegisterBtn')?.addEventListener('click', handleRegister);
   document.getElementById('authLoginBtn')?.addEventListener('click', handleLogin);
   document.getElementById('authGoogleBtn')?.addEventListener('click', handleGoogleLogin);
+  document.getElementById('authGoogleRegisterBtn')?.addEventListener('click', handleGoogleLogin);
   document.getElementById('authResetLink')?.addEventListener('click', handleResetPassword);
   document.getElementById('authResetSaveBtn')?.addEventListener('click', handleResetPasswordUpdate);
   document.getElementById('authLogoutBtn')?.addEventListener('click', handleLogout);
@@ -2227,6 +2228,75 @@ function setupMenuActiveNav(nav, sections = []) {
 }
 
 
+
+function setupMenuRowDragScroll(rows = []) {
+  rows.forEach((row) => {
+    if (!row) return;
+
+    let isPointerDown = false;
+    let lastPointerX = 0;
+
+    const wrapScrollIfNeeded = (deltaX = 0) => {
+      const maxScroll = row.scrollWidth - row.clientWidth;
+      if (maxScroll <= 1) return;
+
+      if (deltaX > 0 && row.scrollLeft <= 0) {
+        row.scrollLeft = maxScroll - 2;
+        return;
+      }
+
+      if (deltaX < 0 && row.scrollLeft >= maxScroll - 1) {
+        row.scrollLeft = 1;
+      }
+    };
+
+    row.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      isPointerDown = true;
+      row.dataset.dragging = 'false';
+      lastPointerX = event.clientX;
+      row.classList.add('dragging');
+      row.setPointerCapture?.(event.pointerId);
+    });
+
+    row.addEventListener('pointermove', (event) => {
+      if (!isPointerDown) return;
+
+      const deltaX = event.clientX - lastPointerX;
+      if (Math.abs(deltaX) > 3) row.dataset.dragging = 'true';
+
+      row.scrollLeft -= deltaX;
+      wrapScrollIfNeeded(deltaX);
+      lastPointerX = event.clientX;
+    });
+
+    const releaseDrag = () => {
+      if (!isPointerDown) return;
+      isPointerDown = false;
+      row.classList.remove('dragging');
+      window.setTimeout(() => { delete row.dataset.dragging; }, 90);
+    };
+
+    row.addEventListener('pointerup', releaseDrag);
+    row.addEventListener('pointercancel', releaseDrag);
+    row.addEventListener('pointerleave', releaseDrag);
+
+    row.addEventListener('click', (event) => {
+      if (row.dataset.dragging === 'true') {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, true);
+
+    row.addEventListener('wheel', (event) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      row.scrollLeft += event.deltaY;
+      wrapScrollIfNeeded(event.deltaY);
+      event.preventDefault();
+    }, { passive: false });
+  });
+}
+
 function openPlatoModal(item, imageUrl, soldOut = false) {
   const modal = document.getElementById('platoModal');
   const name = document.getElementById('platoModalName');
@@ -2272,8 +2342,43 @@ function setupMenuSearch() {
   const input = document.getElementById('menuSearchInput');
   if (!input) return;
 
+  let userTypedSearch = false;
+
+  const clearSearchInput = () => {
+    if (!input.value) return false;
+    input.value = '';
+    return true;
+  };
+
+  const clearIfLooksLikeAutofill = () => {
+    if (userTypedSearch) return;
+    const value = String(input.value || '').trim();
+    if (!value) return;
+
+    const looksLikeCredential = value.includes('@') || value.includes('gmail.com') || value.includes('hotmail.com');
+    if (looksLikeCredential || document.activeElement !== input) {
+      clearSearchInput();
+      cargarMenu();
+    }
+  };
+
+  clearSearchInput();
+  window.setTimeout(clearSearchInput, 120);
+  window.setTimeout(clearIfLooksLikeAutofill, 500);
+  window.setTimeout(clearIfLooksLikeAutofill, 1200);
+  window.setTimeout(clearIfLooksLikeAutofill, 2200);
+  window.addEventListener('pageshow', () => {
+    userTypedSearch = false;
+    clearSearchInput();
+  });
+
   input.addEventListener('input', () => {
+    userTypedSearch = true;
     cargarMenu();
+  });
+
+  input.addEventListener('focus', () => {
+    clearIfLooksLikeAutofill();
   });
 
   input.addEventListener('keydown', (event) => {
@@ -2283,6 +2388,7 @@ function setupMenuSearch() {
     document.getElementById('menu')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
+
 
 function setupTopbarShortcuts() {
   const navCartBtn = document.getElementById('nav-cart-btn');
@@ -2424,6 +2530,9 @@ async function cargarMenu() {
 
     const sectionTitles = Array.from(menu.querySelectorAll('.section-title'));
     setupMenuActiveNav(nav, sectionTitles);
+
+    const menuRows = Array.from(menu.querySelectorAll('.menu-row'));
+    setupMenuRowDragScroll(menuRows);
 
     document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
   } catch (err) {

@@ -211,13 +211,13 @@ body {
   background: linear-gradient(rgba(11,45,77,.7), rgba(11,45,77,.7)), url('../images/Logos/logo.jpg');
   background-size: cover;
   background-position: center;
-  min-height: 160px;
+  min-height: 120px;
   display: flex;
   align-items: center;
 }
 
 .hero-overlay {
-  padding: 20px 18px;
+  padding: 14px 18px;
   color: #fff;
   width: min(980px, 100%);
 }
@@ -310,27 +310,71 @@ body {
 }
 
 .menu-row {
+  --cards-per-row: 5;
+  --card-width: 220px;
+  --card-gap: 14px;
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(220px, 1fr);
-  gap: 14px;
+  grid-auto-columns: var(--card-width);
+  gap: var(--card-gap);
   overflow-x: auto;
+  width: min(100%, calc((var(--cards-per-row) * var(--card-width)) + ((var(--cards-per-row) - 1) * var(--card-gap))));
+  margin: 0 auto;
   padding-bottom: 6px;
-  scroll-snap-type: x mandatory;
+  scroll-snap-type: x proximity;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.menu-row.dragging {
+  cursor: grabbing;
+  scroll-snap-type: none;
+  user-select: none;
+}
+
+.menu-row.dragging .plato {
+  pointer-events: none;
+}
+
+.menu-row:active {
+  cursor: grabbing;
 }
 
 .menu-row::-webkit-scrollbar {
-  height: 8px;
-}
-
-.menu-row::-webkit-scrollbar-thumb {
-  background: #c2d6ea;
-  border-radius: 999px;
+  width: 0;
+  height: 0;
 }
 
 .menu-row .plato {
-  min-width: 220px;
+  min-width: var(--card-width);
   scroll-snap-align: start;
+}
+
+@media (max-width: 1200px) {
+  .menu-row {
+    --cards-per-row: 4;
+  }
+}
+
+@media (max-width: 1024px) {
+  .menu-row {
+    --cards-per-row: 3;
+  }
+}
+
+@media (max-width: 768px) {
+  .menu-row {
+    --cards-per-row: 2;
+  }
+}
+
+@media (max-width: 480px) {
+  .menu-row {
+    --cards-per-row: 1;
+  }
 }
 
 /* ===============================
@@ -1266,4 +1310,24 @@ footer {
   border: 1px solid #e4e7ec;
   border-radius: 10px;
   background: #f8fafc;
+}
+
+
+.auth-google-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.auth-google-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+}
+
+.auth-google-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
