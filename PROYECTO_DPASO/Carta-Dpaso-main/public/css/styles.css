@@ -59,66 +59,191 @@ body {
 }
 
 /* ===============================
-   HEADER
+   HEADER + HERO + NAV (DPASO)
 ================================ */
-.header {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  padding: 20px;
-  background: #0b2d4d;
-  color: #fff;
-}
-
-.header-text h1 {
-  font-size: 1.6rem;
-  letter-spacing: 1px;
-}
-
-.header-text p {
-  font-size: 0.9rem;
-  opacity: 0.9;
-}
-
-/* ===============================
-   NAV
-================================ */
-.nav {
+.dpaso-shell {
   position: sticky;
   top: 0;
-  z-index: 100;
-  background: #1f4e79;
+  z-index: 300;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+.dpaso-topbar {
+  background: linear-gradient(120deg, #0b2d4d 0%, #1f4e79 55%, #2b6a9f 100%);
+  color: #fff;
   display: flex;
-  justify-content: space-around;
-  padding: 12px 5px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.menu-toggle-btn {
+  border: none;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  font-size: 1.35rem;
+  cursor: pointer;
+}
+
+.logo {
+  width: 54px;
+  height: 54px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 2px solid rgba(255,255,255,0.5);
+}
+
+.brand-copy {
+  display: grid;
+  line-height: 1.1;
+}
+
+.brand-copy strong { font-size: 1.02rem; letter-spacing: 0.4px; }
+.brand-copy small { opacity: 0.85; font-size: 0.77rem; }
+
+.dpaso-search-wrap {
+  flex: 1;
+  min-width: 170px;
+  background: #fff;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  color: #667085;
+}
+
+.dpaso-search-wrap input {
+  border: none;
+  outline: none;
+  width: 100%;
+  background: transparent;
+  font-size: 0.92rem;
+}
+
+.dpaso-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.hero-banner {
+  background: linear-gradient(rgba(11,45,77,.7), rgba(11,45,77,.7)), url('../images/Logos/logo.jpg');
+  background-size: cover;
+  background-position: center;
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+}
+
+.hero-overlay {
+  padding: 20px 18px;
+  color: #fff;
+  width: min(980px, 100%);
+}
+
+.hero-eyebrow {
+  margin: 0;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #9fd2ff;
+}
+
+.hero-overlay h1 {
+  margin: 6px 0;
+  font-size: 1.6rem;
+}
+
+.hero-sub {
+  margin: 0;
+  font-size: 0.92rem;
+  opacity: 0.92;
+}
+
+.menu-toolbar {
+  background: #f4f8fc;
+  border-bottom: 1px solid #dce6f1;
+  padding: 10px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.menu-toolbar-title {
+  display: grid;
+  gap: 2px;
+}
+
+.menu-toolbar-title strong { color: #0b2d4d; }
+.menu-toolbar-title small { color: #667085; font-size: 0.82rem; }
+
+.toolbar-track-btn {
+  border: none;
+  background: #1f4e79;
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nav {
+  background: #fff;
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .nav a {
   text-decoration: none;
-  font-size: 0.85rem;
-  font-weight: bold;
-  color: #fff;
-}
-
-.nav a:hover {
-  text-decoration: underline;
-}
-
-.nav a.active {
-  background: rgba(255,255,255,0.18);
-  padding: 6px 10px;
+  font-size: 0.87rem;
+  font-weight: 800;
+  color: #0b2d4d;
+  background: #f2f6fb;
+  border: 1px solid #d6e2f0;
+  padding: 7px 11px;
   border-radius: 999px;
-  text-decoration: none;
+  white-space: nowrap;
+}
+
+.nav a:hover,
+.nav a.active {
+  color: #fff;
+  background: #1f4e79;
+  border-color: #1f4e79;
+}
+
+@media (max-width: 940px) {
+  .dpaso-actions,
+  .brand-copy { display: none; }
+
+  .hero-overlay h1 { font-size: 1.3rem; }
 }
 
 /* ===============================
    MENU GRID
 ================================ */
+.menu-wrapper {
+  background: #f8fafc;
+  padding: 20px 0 28px;
+}
+
 .menu {
   display: grid;
-  gap: 16px;
-  padding: 20px;
-  max-width: 1600px;
+  gap: 18px;
+  padding: 0 20px 10px;
+  max-width: 1400px;
   margin: auto;
 }
 
@@ -139,65 +264,60 @@ body {
 .plato {
   background: #fff;
   border-radius: 14px;
-  padding: 12px;
-  text-align: center;
-  transition: transform .3s;
-  box-shadow: 0 4px 10px rgba(0,0,0,.06);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
   overflow: hidden;
+  padding-bottom: 12px;
+  border: 1px solid #e8edf3;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.plato:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 22px rgba(15, 23, 42, 0.12);
 }
 
 .plato img {
   width: 100%;
-  height: 220px;
+  height: 190px;
   object-fit: cover;
-  border-radius: 10px;
-  transition: transform .4s ease;
-}
-
-/* Desktop hover */
-.plato:hover img {
-  transform: scale(1.08);
-}
-
-/* Mobile tap */
-.plato:active img {
-  transform: scale(1.1);
 }
 
 .plato h3 {
-  margin: 10px 0 5px;
-  font-size: 1rem;
+  margin: 12px 12px 4px;
+  font-size: 1.03rem;
   color: #0b2d4d;
 }
 
 .plato p {
-  font-size: 0.85rem;
-  color: #555;
+  font-size: 0.84rem;
+  color: #5b6473;
+  margin: 0 12px;
+  min-height: 34px;
 }
 
 .plato span {
   display: block;
-  margin-top: 6px;
-  font-weight: bold;
+  margin: 10px 12px 0;
+  font-weight: 800;
   color: #1f4e79;
+  font-size: 1.06rem;
 }
 
 .add-cart-btn {
-  margin-top: 10px;
-  width: auto;
-  min-width: 128px;
+  margin: 12px 12px 0;
+  width: calc(100% - 24px);
   border: none;
-  border-radius: 999px;
-  background: #1f4e79;
+  border-radius: 10px;
+  background: linear-gradient(120deg, #1f4e79 0%, #2b6a9f 100%);
   color: #fff;
-  font-weight: 600;
-  font-size: 0.82rem;
-  padding: 7px 12px;
+  font-weight: 700;
+  font-size: 0.86rem;
+  padding: 10px 12px;
   cursor: pointer;
 }
 
 .add-cart-btn:hover {
-  background: #163c60;
+  filter: brightness(1.05);
 }
 
 
@@ -221,16 +341,40 @@ body {
    FOOTER
 ================================ */
 footer {
-  background: #0b2d4d;
+  background: #0a2238;
+  color: #dbe9f6;
+  padding: 26px 20px 34px;
+}
+
+.footer-grid {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+.footer-grid h4 {
+  margin: 0 0 8px;
   color: #fff;
-  padding: 20px;
-  text-align: center;
+}
+
+.footer-grid p {
+  margin: 4px 0;
+  font-size: 0.9rem;
+}
+
+.socials {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
 }
 
 .socials img {
-  width: 26px;
+  width: 25px;
   filter: invert(1);
-  margin: 15px 8px;
 }
 
 /* ===============================
@@ -307,8 +451,8 @@ footer {
 ================================ */
 .whatsapp-float {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
+  bottom: 18px;
+  right: 18px;
   width: 55px;
   height: 55px;
   background: #178d42;
@@ -334,8 +478,8 @@ footer {
 ================================ */
 .cart-float {
   position: fixed;
-  bottom: 20px;
-  right: 88px;
+  bottom: 18px;
+  right: 84px;
   width: 55px;
   height: 55px;
   border: none;
@@ -700,12 +844,6 @@ footer {
   gap: 8px;
 }
 
-.tracking-link {
-  color: #fff;
-  font-weight: 700;
-  text-decoration: underline;
-}
-
 .receipt-track-btn {
   border: 1px solid #1f4e79;
   background: #fff;
@@ -860,32 +998,6 @@ footer {
 }
 
 
-.tracking-float {
-  position: fixed;
-  right: 20px;
-  bottom: 92px;
-  z-index: 1200;
-  border: none;
-  border-radius: 999px;
-  background: #0b2d4d;
-  color: #fff;
-  box-shadow: 0 10px 24px rgba(11, 45, 77, 0.35);
-  padding: 10px 14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.tracking-float:hover {
-  background: #123d66;
-}
-
-.tracking-float-icon {
-  font-size: 1rem;
-}
-
 .cart-availability-note {
   margin: 8px 0 0;
   color: #b42318;
@@ -893,22 +1005,10 @@ footer {
   font-weight: 600;
 }
 
-@media (max-width: 640px) {
-  .tracking-float {
-    right: 14px;
-    bottom: 88px;
-    padding: 10px;
-  }
-
-  .tracking-float span:last-child {
-    display: none;
-  }
-}
-
 .auth-float {
   position: fixed;
   right: 20px;
-  bottom: 150px;
+  bottom: 86px;
   z-index: 1200;
   border: none;
   border-radius: 999px;
@@ -928,7 +1028,7 @@ footer {
 @media (max-width: 640px) {
   .auth-float {
     right: 14px;
-    bottom: 142px;
+    bottom: 80px;
     padding: 9px;
   }
   .auth-float span:last-child { display: none; }
