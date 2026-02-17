@@ -1817,6 +1817,7 @@ async function initAuth() {
   document.getElementById('authRegisterBtn')?.addEventListener('click', handleRegister);
   document.getElementById('authLoginBtn')?.addEventListener('click', handleLogin);
   document.getElementById('authGoogleBtn')?.addEventListener('click', handleGoogleLogin);
+  document.getElementById('authGoogleRegisterBtn')?.addEventListener('click', handleGoogleLogin);
   document.getElementById('authResetLink')?.addEventListener('click', handleResetPassword);
   document.getElementById('authResetSaveBtn')?.addEventListener('click', handleResetPasswordUpdate);
   document.getElementById('authLogoutBtn')?.addEventListener('click', handleLogout);
@@ -2227,6 +2228,75 @@ function setupMenuActiveNav(nav, sections = []) {
 }
 
 
+
+function setupMenuRowDragScroll(rows = []) {
+  rows.forEach((row) => {
+    if (!row) return;
+
+    let isPointerDown = false;
+    let startX = 0;
+    let startScrollLeft = 0;
+
+    const normalizeLoop = () => {
+      const maxScroll = row.scrollWidth - row.clientWidth;
+      if (maxScroll <= 1) return;
+      if (row.scrollLeft >= maxScroll - 2) {
+        row.scrollLeft = 1;
+      } else if (row.scrollLeft <= 0) {
+        row.scrollLeft = maxScroll - 2;
+      }
+    };
+
+    row.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      isPointerDown = true;
+      row.dataset.dragging = 'false';
+      startX = event.clientX;
+      startScrollLeft = row.scrollLeft;
+      row.classList.add('dragging');
+      row.setPointerCapture?.(event.pointerId);
+    });
+
+    row.addEventListener('pointermove', (event) => {
+      if (!isPointerDown) return;
+      const delta = event.clientX - startX;
+      if (Math.abs(delta) > 4) row.dataset.dragging = 'true';
+      row.scrollLeft = startScrollLeft - delta;
+      normalizeLoop();
+    });
+
+    const releaseDrag = () => {
+      if (!isPointerDown) return;
+      isPointerDown = false;
+      row.classList.remove('dragging');
+      window.setTimeout(() => { delete row.dataset.dragging; }, 100);
+      normalizeLoop();
+    };
+
+    row.addEventListener('pointerup', releaseDrag);
+    row.addEventListener('pointercancel', releaseDrag);
+    row.addEventListener('pointerleave', releaseDrag);
+
+    row.addEventListener('click', (event) => {
+      if (row.dataset.dragging === 'true') {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, true);
+
+    row.addEventListener('wheel', (event) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      row.scrollLeft += event.deltaY;
+      normalizeLoop();
+      event.preventDefault();
+    }, { passive: false });
+
+    row.addEventListener('scroll', () => {
+      if (!isPointerDown) normalizeLoop();
+    }, { passive: true });
+  });
+}
+
 function openPlatoModal(item, imageUrl, soldOut = false) {
   const modal = document.getElementById('platoModal');
   const name = document.getElementById('platoModalName');
@@ -2272,6 +2342,20 @@ function setupMenuSearch() {
   const input = document.getElementById('menuSearchInput');
   if (!input) return;
 
+  const clearSearchInput = () => {
+    if (input.value) input.value = '';
+  };
+
+  clearSearchInput();
+  window.setTimeout(clearSearchInput, 120);
+  window.addEventListener('pageshow', clearSearchInput);
+
+  input.addEventListener('focus', () => {
+    if (!input.value) return;
+    clearSearchInput();
+    cargarMenu();
+  });
+
   input.addEventListener('input', () => {
     cargarMenu();
   });
@@ -2283,6 +2367,7 @@ function setupMenuSearch() {
     document.getElementById('menu')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
+
 
 function setupTopbarShortcuts() {
   const navCartBtn = document.getElementById('nav-cart-btn');
@@ -2424,6 +2509,9 @@ async function cargarMenu() {
 
     const sectionTitles = Array.from(menu.querySelectorAll('.section-title'));
     setupMenuActiveNav(nav, sectionTitles);
+
+    const menuRows = Array.from(menu.querySelectorAll('.menu-row'));
+    setupMenuRowDragScroll(menuRows);
 
     document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
   } catch (err) {
