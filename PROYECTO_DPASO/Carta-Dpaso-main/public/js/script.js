@@ -43,6 +43,16 @@ const menuRowControllers = new Set();
 const uiBusyOps = new Set();
 let topbarShortcutsReady = false;
 let authInitReady = false;
+let trackingEventsReady = false;
+let cartModalEventsReady = false;
+let menuSearchReady = false;
+let keepAliveIntervalId = null;
+let menuLoadInFlight = null;
+let menuLoadQueued = false;
+let menuSearchDebounceId = null;
+let avatarPreviewUrl = '';
+let runtimeGuardsReady = false;
+const diagnostics = { listenerBindings: new Map(), setupCalls: new Map(), requestCounts: new Map(), lastLogAt: 0 };
 
 function getAuthRedirectUrl() {
   return `${window.location.origin}${window.location.pathname}`;
@@ -97,6 +107,55 @@ function withTimeout(promise, timeoutMs = 12000, timeoutMessage = 'La operación
     timeoutMessage,
     retries: 1
   });
+}
+
+function markSetupCall(name = '') {
+  if (!name) return;
+  diagnostics.setupCalls.set(name, (diagnostics.setupCalls.get(name) || 0) + 1);
+}
+
+function markBinding(name = '') {
+  if (!name) return;
+  diagnostics.listenerBindings.set(name, (diagnostics.listenerBindings.get(name) || 0) + 1);
+}
+
+function markRequest(name = '') {
+  if (!name) return;
+  diagnostics.requestCounts.set(name, (diagnostics.requestCounts.get(name) || 0) + 1);
+}
+
+function logDiagnostics(reason = '') {
+  const now = Date.now();
+  if ((now - diagnostics.lastLogAt) < 5000) return;
+  diagnostics.lastLogAt = now;
+
+  const setupSummary = Object.fromEntries(diagnostics.setupCalls.entries());
+  const bindingSummary = Object.fromEntries(diagnostics.listenerBindings.entries());
+  const requestSummary = Object.fromEntries(diagnostics.requestCounts.entries());
+
+  console.info('🧭 diagnostics', {
+    reason,
+    setups: setupSummary,
+    bindings: bindingSummary,
+    requests: requestSummary,
+    activeMenuCarousels: menuRowControllers.size,
+    trackingIntervalActive: Boolean(trackingIntervalId),
+    keepAliveIntervalActive: Boolean(keepAliveIntervalId),
+    busyOps: Array.from(uiBusyOps.values())
+  });
+}
+
+async function runCriticalUiAction(opKey, action, { onError, timeoutMs = 15000, timeoutMessage = 'La operación tardó demasiado.' } = {}) {
+  if (!beginUiOp(opKey)) return { skipped: true };
+  try {
+    return await runRequestWithPolicy(action, { timeoutMs, timeoutMessage, retries: 0 });
+  } catch (error) {
+    if (typeof onError === 'function') onError(error);
+    else throw error;
+    return null;
+  } finally {
+    endUiOp(opKey);
+  }
 }
 
 
@@ -487,6 +546,7 @@ function renderTracking(data) {
 }
 
 async function fetchOrderStatus(code, options = {}) {
+  markRequest('tracking:get_order_status');
   const normalizedCode = normalizeTrackingCode(code);
   const result = document.getElementById('trackingResult');
   const refreshBtn = document.getElementById('trackingRefreshBtn');
@@ -523,6 +583,9 @@ async function fetchOrderStatus(code, options = {}) {
 }
 
 function setupTrackingEvents() {
+  markSetupCall('tracking');
+  if (trackingEventsReady) { logDiagnostics('setupTrackingEvents:skip-duplicate'); return; }
+  trackingEventsReady = true;
   const openBtn = document.getElementById('btnTracking');
   const floatBtn = document.getElementById('tracking-float-btn');
   const closeBtn = document.getElementById('trackingCloseBtn');
@@ -532,6 +595,7 @@ function setupTrackingEvents() {
   const input = document.getElementById('trackingCode');
   const modal = document.getElementById('trackingModal');
 
+  markBinding('tracking:open');
   openBtn?.addEventListener('click', (event) => {
     event.preventDefault();
     openTrackingModal();
@@ -585,6 +649,7 @@ function getEffectiveStoreSettings() {
 }
 
 async function getStoreSettings() {
+  markRequest('store_settings');
   try {
     const { data, error } = await supabaseClient
       .from('store_settings')
@@ -615,6 +680,7 @@ async function getStoreSettings() {
 }
 
 async function getDeliveryZones() {
+  markRequest('delivery_zones');
   try {
     const { data, error } = await supabaseClient
       .from('delivery_zones')
@@ -1308,6 +1374,9 @@ function updateDireccionRequired() {
 
 
 function setupCartModalEvents() {
+  markSetupCall('cartModal');
+  if (cartModalEventsReady) { logDiagnostics('setupCartModalEvents:skip-duplicate'); return; }
+  cartModalEventsReady = true;
   const cartButton = document.getElementById('cart-float-btn') || document.getElementById('nav-cart-btn');
   const closeButton = document.getElementById('cart-close-btn');
   const modal = document.getElementById('cart-modal');
@@ -1490,6 +1559,36 @@ function applyProfileAvatar(profileAvatar, label = '👤', avatarUrl = '') {
   }
   profileAvatar.style.backgroundImage = 'none';
   profileAvatar.textContent = label || '👤';
+}
+
+function clearAvatarPreview() {
+  if (avatarPreviewUrl) {
+    URL.revokeObjectURL(avatarPreviewUrl);
+    avatarPreviewUrl = '';
+  }
+}
+
+function handleProfilePhotoPreview() {
+  const profileAvatar = document.getElementById('authProfileAvatar');
+  const photoInput = document.getElementById('authProfilePhoto');
+  if (!profileAvatar || !photoInput) return;
+
+  clearAvatarPreview();
+  const file = photoInput.files?.[0];
+  if (!file) {
+    updateAuthUi();
+    return;
+  }
+
+  if (!String(file.type || '').startsWith('image/')) {
+    setAuthFeedback('El archivo debe ser una imagen válida.', 'error');
+    photoInput.value = '';
+    updateAuthUi();
+    return;
+  }
+
+  avatarPreviewUrl = URL.createObjectURL(file);
+  applyProfileAvatar(profileAvatar, '', avatarPreviewUrl);
 }
 
 
@@ -1709,7 +1808,8 @@ async function handleSaveProfile() {
       saveBtn.textContent = 'Guardando...';
     }
 
-    let avatarUrl = getProfileAvatarUrl();
+    const previousAvatarUrl = getProfileAvatarUrl();
+    let avatarUrl = previousAvatarUrl;
     if (photoFile) {
       if (!String(photoFile.type || '').startsWith('image/')) {
         setAuthFeedback('El archivo debe ser una imagen válida.', 'error');
@@ -1732,6 +1832,8 @@ async function handleSaveProfile() {
         'La subida de la foto tardó demasiado.'
       );
       if (uploadError) {
+        clearAvatarPreview();
+        updateAuthUi();
         setAuthFeedback(`No se pudo subir foto: ${uploadError.message || 'error de storage'}`, 'error');
         return;
       }
@@ -1750,6 +1852,9 @@ async function handleSaveProfile() {
         'No se pudo guardar metadata de avatar.'
       );
       if (userMetaError) {
+        authProfile = { ...(authProfile || {}), avatar_url: previousAvatarUrl };
+        clearAvatarPreview();
+        updateAuthUi();
         setAuthFeedback(`La foto subió pero no se pudo vincular al perfil: ${userMetaError.message || 'error de metadata'}`, 'error');
         return;
       }
@@ -1779,6 +1884,9 @@ async function handleSaveProfile() {
     }
 
     await refreshAuthSession();
+    clearAvatarPreview();
+    const photoInput = document.getElementById('authProfilePhoto');
+    if (photoInput) photoInput.value = '';
     updateAuthUi();
     setAuthFeedback('Perfil actualizado ✅', 'success');
   } catch (error) {
@@ -1855,35 +1963,34 @@ async function handleRegister() {
 }
 
 async function handleLogin() {
-  if (!beginUiOp('login')) return;
   const loginBtn = document.getElementById('authLoginBtn');
   if (loginBtn) loginBtn.disabled = true;
-  try {
-    const email = String(document.getElementById('authLoginEmail')?.value || '').trim().toLowerCase();
-  const password = String(document.getElementById('authLoginPassword')?.value || '').trim();
-  if (!email || !password) {
-    setAuthFeedback('Ingresa correo y contraseña.', 'error');
-    return;
-  }
 
-  const { error } = await withTimeout(
-    supabaseClient.auth.signInWithPassword({ email, password }),
-    12000,
-    'El inicio de sesión tardó demasiado. Intenta nuevamente.'
-  );
-  if (error) {
-    setAuthFeedback(friendlyAuthError(error), 'error');
-    return;
-  }
-  authRecoveryMode = false;
-  setAuthFeedback('Sesión iniciada ✅', 'success');
+  await runCriticalUiAction('login', async () => {
+    const email = String(document.getElementById('authLoginEmail')?.value || '').trim().toLowerCase();
+    const password = String(document.getElementById('authLoginPassword')?.value || '').trim();
+    if (!email || !password) {
+      setAuthFeedback('Ingresa correo y contraseña.', 'error');
+      return;
+    }
+
+    const { error } = await withTimeout(
+      supabaseClient.auth.signInWithPassword({ email, password }),
+      12000,
+      'El inicio de sesión tardó demasiado. Intenta nuevamente.'
+    );
+    if (error) throw error;
+
+    authRecoveryMode = false;
+    setAuthFeedback('Sesión iniciada ✅', 'success');
     closeAuthModal();
-  } catch (error) {
-    setAuthFeedback(friendlyRuntimeError(error, 'No se pudo iniciar sesión.'), 'error');
-  } finally {
-    if (loginBtn) loginBtn.disabled = false;
-    endUiOp('login');
-  }
+  }, {
+    timeoutMs: 15000,
+    timeoutMessage: 'El inicio de sesión tardó demasiado. Intenta nuevamente.',
+    onError: (error) => setAuthFeedback(friendlyRuntimeError(error, friendlyAuthError(error)), 'error')
+  });
+
+  if (loginBtn) loginBtn.disabled = false;
 }
 
 async function handleResetPassword() {
@@ -1939,9 +2046,10 @@ async function handleGoogleLogin() {
 }
 
 async function handleLogout() {
-  if (!beginUiOp('logout')) return;
+  if (uiBusyOps.has('logout')) return;
   const logoutBtn = document.getElementById('authLogoutBtn');
   if (logoutBtn) logoutBtn.disabled = true;
+  uiBusyOps.add('logout');
   let signOutError = null;
 
   try {
@@ -1961,24 +2069,24 @@ async function handleLogout() {
     }
   } catch (error) {
     signOutError = error;
-  }
-
-  authRecoveryMode = false;
-  authSession = null;
-  authProfile = null;
-  setAuthMode('login');
-  updateAuthUi();
-  closeMyOrdersModal();
-
-  if (signOutError) {
-    setAuthFeedback(`Sesión local cerrada. ${friendlyRuntimeError(signOutError, friendlyAuthError(signOutError))}`, 'info');
-  } else {
+  } finally {
+    authRecoveryMode = false;
+    authSession = null;
+    authProfile = null;
     setAuthMode('login');
-    setAuthFeedback('Sesión cerrada ✅', 'success');
-  }
+    updateAuthUi();
+    closeMyOrdersModal();
 
-  if (logoutBtn) logoutBtn.disabled = false;
-  endUiOp('logout');
+    if (signOutError) {
+      setAuthFeedback(`Sesión local cerrada. ${friendlyRuntimeError(signOutError, friendlyAuthError(signOutError))}`, 'info');
+    } else {
+      setAuthMode('login');
+      setAuthFeedback('Sesión cerrada ✅', 'success');
+    }
+
+    if (logoutBtn) logoutBtn.disabled = false;
+    uiBusyOps.delete('logout');
+  }
 }
 
 
@@ -2022,6 +2130,7 @@ async function initAuth() {
     setAccountSection('profile');
   });
   document.getElementById('authProfileSaveBtn')?.addEventListener('click', handleSaveProfile);
+  document.getElementById('authProfilePhoto')?.addEventListener('change', handleProfilePhotoPreview);
 
   setAuthMode('login');
   setAccountSection('profile');
@@ -2098,7 +2207,8 @@ async function initAuth() {
   });
 
   window.addEventListener('focus', refreshSessionOnWake);
-  setInterval(() => {
+  if (keepAliveIntervalId) clearInterval(keepAliveIntervalId);
+  keepAliveIntervalId = setInterval(() => {
     if (document.hidden) return;
     recoverInteractiveUiState();
   }, 30000);
@@ -2695,13 +2805,19 @@ function closePlatoModal() {
 }
 
 function setupMenuSearch() {
+  markSetupCall('menuSearch');
+  if (menuSearchReady) { logDiagnostics('setupMenuSearch:skip-duplicate'); return; }
+  menuSearchReady = true;
+
   const input = document.getElementById('menuSearchInput');
   if (!input) return;
 
-  input.value = '';
-
   input.addEventListener('input', () => {
-    cargarMenu();
+    if (menuSearchDebounceId) clearTimeout(menuSearchDebounceId);
+    menuSearchDebounceId = setTimeout(() => {
+      cargarMenu();
+      menuSearchDebounceId = null;
+    }, 180);
   });
 
   input.addEventListener('keydown', (event) => {
@@ -2804,10 +2920,18 @@ function setupTopbarShortcuts() {
 // CARGAR MENÚ Y NAVBAR
 // ===============================
 async function cargarMenu() {
+  if (menuLoadInFlight) {
+    menuLoadQueued = true;
+    logDiagnostics('cargarMenu:queued');
+    return menuLoadInFlight;
+  }
+
+  markRequest('menu:cargar');
   const menu = document.getElementById('menu');
   const nav = document.querySelector('.nav');
-  if (!menu || !nav) return;
+  if (!menu || !nav) return null;
 
+  menuLoadInFlight = (async () => {
   try {
     const { data: platosData, error: platosError } = await supabaseClient
       .from('platos')
@@ -2919,7 +3043,17 @@ async function cargarMenu() {
     console.error('❌ Error cargando menú:', err);
     destroyMenuRowControllers();
     menu.innerHTML = '<p>Error cargando el menú. Revisa la consola.</p>';
+  } finally {
+    menuLoadInFlight = null;
+    if (menuLoadQueued) {
+      menuLoadQueued = false;
+      void cargarMenu();
+    }
+    logDiagnostics('cargarMenu:done');
   }
+  })();
+
+  return menuLoadInFlight;
 }
 
 // ===============================
@@ -2930,20 +3064,27 @@ window.refreshMenu = async function () {
 };
 
 // ===============================
-// INIT
+// BOOTSTRAP API
 // ===============================
-window.addEventListener('load', async () => {
+
+function setupRuntimeGuards() {
+  if (runtimeGuardsReady) return;
+  runtimeGuardsReady = true;
+
+  window.addEventListener('unhandledrejection', (event) => {
+    console.error('❌ unhandled promise rejection', event.reason || event);
+    logDiagnostics('unhandledrejection');
+  });
+
+  window.addEventListener('error', (event) => {
+    console.error('❌ runtime error', event.error || event.message || event);
+    logDiagnostics('runtime-error');
+  });
+}
+
+async function bootstrapAppCore() {
+  setupRuntimeGuards();
   loadCart();
-  setupCartModalEvents();
-  setupTrackingEvents();
-  setupTopbarShortcuts();
-  setupMenuSearch();
-
-  const platoModal = document.getElementById('platoModal');
-  document.getElementById('platoModalClose')?.addEventListener('click', closePlatoModal);
-  platoModal?.addEventListener('click', (e) => { if (e.target === platoModal) closePlatoModal(); });
-
-  await initAuth();
   updateDireccionRequired();
   updateCartBadge();
   renderCartModal();
@@ -2954,4 +3095,15 @@ window.addEventListener('load', async () => {
 
   const loader = document.getElementById('loader');
   if (loader) setTimeout(() => loader.classList.add('hide'), 1500);
+  logDiagnostics('bootstrap:core-ready');
+}
+
+window.DPASO_APP = Object.assign(window.DPASO_APP || {}, {
+  bootstrapAppCore,
+  initAuth,
+  setupCartModalEvents,
+  setupTrackingEvents,
+  setupTopbarShortcuts,
+  setupMenuSearch,
+  closePlatoModal
 });

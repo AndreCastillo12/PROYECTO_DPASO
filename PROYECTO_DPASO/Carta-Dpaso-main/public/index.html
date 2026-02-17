@@ -138,10 +138,10 @@
       <strong>DPASO</strong>
       <small>Cocina Libre</small>
     </div>
-    <div class="dpaso-search-wrap">
+    <form class="dpaso-search-wrap" role="search" autocomplete="off" onsubmit="return false;">
       <span>🔎</span>
-      <input id="menuSearchInput" name="site_menu_search" type="search" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="search" aria-label="Buscar platos">
-    </div>
+      <input id="menuSearchInput" name="menu_search_query" type="search" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="search" aria-label="Buscar platos">
+    </form>
     <div class="dpaso-actions">
       <button id="nav-tracking-btn" class="nav-action-btn" type="button">
         <span>🛵</span>
@@ -266,15 +266,15 @@
           <button id="authTabRegister" class="auth-tab" type="button">Crear cuenta</button>
         </div>
 
-        <div id="authLoginView">
+        <form id="authLoginView" autocomplete="on" onsubmit="return false;">
           <label class="auth-field-label" for="authLoginEmail">Correo</label>
-          <input id="authLoginEmail" name="email" type="email" placeholder="Correo" autocomplete="email" />
+          <input id="authLoginEmail" name="username" type="email" placeholder="Correo" autocomplete="username" />
           <label class="auth-field-label" for="authLoginPassword">Contraseña</label>
           <input id="authLoginPassword" name="password" type="password" placeholder="Contraseña" autocomplete="current-password" />
           <button id="authLoginBtn" class="tracking-btn tracking-primary tracking-full" type="button">Ingresar</button>
           <button id="authResetLink" class="auth-link-btn" type="button">¿Olvidaste tu contraseña?</button>
           <button id="authGoogleBtn" class="tracking-btn tracking-ghost tracking-full" type="button">Ingresar con Google</button>
-        </div>
+        </form>
 
         <div id="authResetView" style="display:none;">
           <p class="auth-note" style="margin-bottom:10px;">Ingresa tu nueva contraseña para completar la recuperación.</p>
@@ -370,5 +370,9 @@
 
 <!-- TU SCRIPT -->
 <script src="js/script.js"></script>
+<script src="js/modules/ui.module.js"></script>
+<script src="js/modules/orders.module.js"></script>
+<script src="js/modules/auth.module.js"></script>
+<script src="js/bootstrap.js"></script>
 </body>
 </html>
