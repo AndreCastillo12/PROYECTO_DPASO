@@ -2,6 +2,15 @@ import { Navigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useEffect, useState } from "react";
 
+async function recoverSession() {
+  const { data: current } = await supabase.auth.getSession();
+  if (current?.session) return current.session;
+
+  const { data: refreshed, error } = await supabase.auth.refreshSession();
+  if (error) return null;
+  return refreshed?.session || null;
+}
+
 export default function ProtectedRoute({ children }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
@@ -9,20 +18,37 @@ export default function ProtectedRoute({ children }) {
   useEffect(() => {
     let mounted = true;
 
-    // 1) Check inicial
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
-      setLoading(false);
-    });
+    async function bootstrap() {
+      try {
+        const nextSession = await recoverSession();
+        if (!mounted) return;
+        setSession(nextSession);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
 
-    // 2) Escuchar cambios de sesión (login/logout)
+    bootstrap();
+
+    const onWake = async () => {
+      if (document.hidden) return;
+      const nextSession = await recoverSession();
+      if (!mounted) return;
+      setSession(nextSession);
+    };
+
+    window.addEventListener("focus", onWake);
+    document.addEventListener("visibilitychange", onWake);
+
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      if (!mounted) return;
       setSession(newSession);
     });
 
     return () => {
       mounted = false;
+      window.removeEventListener("focus", onWake);
+      document.removeEventListener("visibilitychange", onWake);
       sub?.subscription?.unsubscribe();
     };
   }, []);
