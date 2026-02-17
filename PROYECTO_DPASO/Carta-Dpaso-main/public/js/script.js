@@ -39,6 +39,7 @@ let authFeedbackTimer = null;
 let authActiveSection = 'profile';
 let menuDataCache = { platos: [], categorias: [] };
 let categoryCursor = -1;
+const menuRowAutoScrollTimers = new WeakMap();
 
 function getAuthRedirectUrl() {
   return `${window.location.origin}${window.location.pathname}`;
@@ -2227,6 +2228,98 @@ function setupMenuActiveNav(nav, sections = []) {
 }
 
 
+
+function clearMenuRowAutoScroll(row) {
+  const timer = menuRowAutoScrollTimers.get(row);
+  if (timer) {
+    window.clearInterval(timer);
+    menuRowAutoScrollTimers.delete(row);
+  }
+}
+
+function setupMenuRowCarousel(rows = []) {
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  rows.forEach((row) => {
+    if (!row) return;
+    clearMenuRowAutoScroll(row);
+
+    let isPointerDown = false;
+    let startX = 0;
+    let startScrollLeft = 0;
+    let dragging = false;
+
+    const pauseAutoScroll = () => clearMenuRowAutoScroll(row);
+
+    const startAutoScroll = () => {
+      if (reducedMotion) return;
+      if (row.scrollWidth <= row.clientWidth + 2) return;
+
+      const timer = window.setInterval(() => {
+        if (isPointerDown || dragging) return;
+        const maxScroll = row.scrollWidth - row.clientWidth;
+        const nearEnd = row.scrollLeft >= maxScroll - 6;
+
+        if (nearEnd) {
+          row.scrollTo({ left: 0, behavior: 'smooth' });
+          return;
+        }
+
+        row.scrollBy({ left: 180, behavior: 'smooth' });
+      }, 2600);
+
+      menuRowAutoScrollTimers.set(row, timer);
+    };
+
+    row.addEventListener('pointerdown', (event) => {
+      isPointerDown = true;
+      dragging = false;
+      startX = event.clientX;
+      startScrollLeft = row.scrollLeft;
+      row.classList.add('dragging');
+      pauseAutoScroll();
+      row.setPointerCapture?.(event.pointerId);
+    });
+
+    row.addEventListener('pointermove', (event) => {
+      if (!isPointerDown) return;
+      const delta = event.clientX - startX;
+      if (Math.abs(delta) > 3) {
+        dragging = true;
+        row.dataset.dragging = 'true';
+      }
+      row.scrollLeft = startScrollLeft - delta;
+    });
+
+    const releaseDrag = () => {
+      if (!isPointerDown) return;
+      isPointerDown = false;
+      row.classList.remove('dragging');
+      window.setTimeout(() => { delete row.dataset.dragging; }, 120);
+      window.setTimeout(startAutoScroll, 1400);
+    };
+
+    row.addEventListener('pointerup', releaseDrag);
+    row.addEventListener('pointercancel', releaseDrag);
+    row.addEventListener('mouseleave', () => {
+      if (!isPointerDown) window.setTimeout(startAutoScroll, 1200);
+    });
+
+    row.addEventListener('click', (event) => {
+      if (row.dataset.dragging === 'true') {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, true);
+
+    row.addEventListener('mouseenter', pauseAutoScroll);
+    row.addEventListener('touchstart', pauseAutoScroll, { passive: true });
+    row.addEventListener('wheel', pauseAutoScroll, { passive: true });
+
+    startAutoScroll();
+  });
+}
+
 function openPlatoModal(item, imageUrl, soldOut = false) {
   const modal = document.getElementById('platoModal');
   const name = document.getElementById('platoModalName');
@@ -2424,6 +2517,9 @@ async function cargarMenu() {
 
     const sectionTitles = Array.from(menu.querySelectorAll('.section-title'));
     setupMenuActiveNav(nav, sectionTitles);
+
+    const menuRows = Array.from(menu.querySelectorAll('.menu-row'));
+    setupMenuRowCarousel(menuRows);
 
     document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
   } catch (err) {
