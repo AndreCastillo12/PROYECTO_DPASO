@@ -7,6 +7,7 @@
     setupCalls: new Map(),
     requestCounts: new Map(),
     bindings: new Map(),
+    inFlightOps: new Map(),
     globalListeners: new Map(),
     lastLogAt: 0
   };
@@ -32,8 +33,18 @@
       activeRafCount: state.rafCount,
       setups: Object.fromEntries(state.setupCalls.entries()),
       bindings: Object.fromEntries(state.bindings.entries()),
-      requests: Object.fromEntries(state.requestCounts.entries())
+      requests: Object.fromEntries(state.requestCounts.entries()),
+      inFlight: Object.fromEntries(state.inFlightOps.entries())
     });
+  }
+
+
+  function markInFlight(opKey = '', delta = 0) {
+    if (!opKey || !Number.isFinite(delta) || delta === 0) return 0;
+    const next = Math.max(0, (state.inFlightOps.get(opKey) || 0) + delta);
+    if (next === 0) state.inFlightOps.delete(opKey);
+    else state.inFlightOps.set(opKey, next);
+    return next;
   }
 
   function addGlobalListener(target, id, handler, options) {
@@ -64,8 +75,12 @@
     onError,
     onFinally
   } = {}) {
-    if (busySet?.has(opKey)) return { skipped: true };
+    if (busySet?.has(opKey)) {
+      if (debugEnabled) console.warn('⚠️ critical-op duplicate blocked', { opKey });
+      return { skipped: true };
+    }
     busySet?.add(opKey);
+    markInFlight(opKey, 1);
     const timeoutCtrl = createTimeoutController(timeoutMs);
 
     try {
@@ -77,6 +92,7 @@
     } finally {
       timeoutCtrl.clear();
       busySet?.delete(opKey);
+      markInFlight(opKey, -1);
       if (typeof onFinally === 'function') onFinally();
     }
   }
@@ -91,6 +107,7 @@
       markRequest(name) { mark(state.requestCounts, name); },
       markTimer(delta = 0) { state.timerCount = Math.max(0, state.timerCount + delta); },
       markRaf(delta = 0) { state.rafCount = Math.max(0, state.rafCount + delta); },
+      markInFlight(opKey, delta = 0) { return markInFlight(opKey, delta); },
       logSnapshot
     },
     addGlobalListener,
