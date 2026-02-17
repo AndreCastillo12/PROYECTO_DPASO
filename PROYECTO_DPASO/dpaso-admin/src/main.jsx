@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
 import AdminLayout from "./layouts/AdminLayout";
+import Dashboard from "./pages/Dashboard";
 import Platos from "./pages/Platos";
 import Categorias from "./pages/Categorias";
 import Perfil from "./pages/Perfil";
@@ -28,7 +29,8 @@ const router = createBrowserRouter([
       </ProtectedRoute>
     ),
     children: [
-      { index: true, element: <Platos /> },   // / -> platos
+      { index: true, element: <Dashboard /> },   // / -> dashboard
+      { path: "dashboard", element: <Dashboard /> }, // /dashboard
       { path: "platos", element: <Platos /> }, // /platos
       { path: "categorias", element: <Categorias /> }, // /categorias
       { path: "perfil", element: <Perfil /> }, // /perfil

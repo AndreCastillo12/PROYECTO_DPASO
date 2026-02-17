@@ -37,6 +37,8 @@ let authMode = 'login';
 let authRecoveryMode = false;
 let authFeedbackTimer = null;
 let authActiveSection = 'profile';
+let menuDataCache = { platos: [], categorias: [] };
+let categoryCursor = -1;
 
 function getAuthRedirectUrl() {
   return `${window.location.origin}${window.location.pathname}`;
@@ -75,6 +77,50 @@ async function refreshAuthSession() {
   );
   authSession = data?.session || null;
   return authSession;
+}
+
+function isAuthSessionError(error) {
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('jwt')
+    || message.includes('expired')
+    || message.includes('token')
+    || code === 'PGRST301'
+    || code === 'PGRST302'
+    || code === '42501'
+  );
+}
+
+function recoverInteractiveUiState() {
+  const confirmBtn = document.getElementById('confirm-order-btn');
+  const trackingRefreshBtn = document.getElementById('trackingRefreshBtn');
+  const trackingCodeInput = document.getElementById('trackingCode');
+  const loader = document.getElementById('loader');
+
+  if (loader?.classList && !loader.classList.contains('hide')) {
+    loader.classList.add('hide');
+  }
+
+  if (confirmBtn && !orderSubmitBusy) {
+    confirmBtn.disabled = false;
+    if (!String(confirmBtn.textContent || '').includes('Confirmar')) {
+      confirmBtn.textContent = 'Confirmar pedido';
+    }
+  }
+
+  if (trackingRefreshBtn) {
+    const hasCode = String(trackingCodeInput?.value || '').trim().length >= 6;
+    trackingRefreshBtn.disabled = !hasCode;
+  }
+
+  if (typeof updateCartTotalsAndAvailability === 'function') {
+    try {
+      updateCartTotalsAndAvailability();
+    } catch (_e) {
+      // noop: no romper la UI por una recuperación preventiva
+    }
+  }
 }
 
 function friendlyRuntimeError(error, fallback = 'No se pudo completar la acción.') {
@@ -970,9 +1016,11 @@ function toggleCheckoutSection(forceOpen = false) {
 }
 
 function updateCartBadge() {
+  const count = getCartCount();
   const badge = document.getElementById('cart-badge');
-  if (!badge) return;
-  badge.textContent = getCartCount();
+  const navBadge = document.getElementById('nav-cart-badge');
+  if (badge) badge.textContent = count;
+  if (navBadge) navBadge.textContent = count;
 }
 
 async function refreshCartAvailability() {
@@ -1382,8 +1430,12 @@ function setAccountSection(section = 'profile') {
   editProfileBtn?.classList.toggle('active', safeSection === 'profile');
 
   const profileView = document.getElementById('authProfileView');
+  const ordersView = document.getElementById('authOrdersView');
   if (profileView) {
     profileView.style.display = safeSection === 'profile' ? 'block' : 'none';
+  }
+  if (ordersView) {
+    ordersView.style.display = safeSection === 'orders' ? 'block' : 'none';
   }
 }
 
@@ -1402,6 +1454,7 @@ function updateAuthUi() {
   const authUserInfo = document.getElementById('authUserInfo');
   const authWelcome = document.getElementById('authWelcome');
   const authFloatLabel = document.getElementById('auth-float-label');
+  const topbarAccountLabel = document.getElementById('topbar-account-label');
   const profileFirstName = document.getElementById('authProfileFirstName');
   const profileLastName = document.getElementById('authProfileLastName');
   const profilePhone = document.getElementById('authProfilePhone');
@@ -1421,6 +1474,7 @@ function updateAuthUi() {
     if (authUserInfo) authUserInfo.textContent = `${fullName} · ${email}`;
     if (authWelcome) authWelcome.textContent = 'Tu sesión está activa. Puedes comprar, editar tu perfil y revisar historial.';
     if (authFloatLabel) authFloatLabel.textContent = 'Mi cuenta';
+    if (topbarAccountLabel) topbarAccountLabel.textContent = 'Mi cuenta';
     if (profileFirstName) profileFirstName.value = firstName;
     if (profileLastName) profileLastName.value = lastName;
     if (profilePhone) profilePhone.value = normalizePhoneInput(authProfile?.phone || authSession?.user?.user_metadata?.phone || '');
@@ -1436,6 +1490,7 @@ function updateAuthUi() {
         : 'Compra como invitado o ingresa para ver tu historial.';
     }
     if (authFloatLabel) authFloatLabel.textContent = 'Ingresar';
+    if (topbarAccountLabel) topbarAccountLabel.textContent = 'Mi cuenta';
   }
 }
 
@@ -1455,21 +1510,14 @@ function closeAuthModal() {
 }
 
 function closeMyOrdersModal() {
-  const modal = document.getElementById('myOrdersModal');
-  if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
   setAccountSection('profile');
 }
 
 async function openMyOrdersModal() {
-  const modal = document.getElementById('myOrdersModal');
   const result = document.getElementById('myOrdersResult');
-  if (!modal || !result) return;
+  if (!result) return;
 
   setAccountSection('orders');
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
   result.innerHTML = '<p>Cargando tus pedidos...</p>';
 
   try {
@@ -1740,12 +1788,24 @@ async function initAuth() {
   const authBtn = document.getElementById('auth-float-btn');
   const authClose = document.getElementById('authCloseBtn');
   const authModal = document.getElementById('authModal');
-  const myOrdersModal = document.getElementById('myOrdersModal');
+  const menuToggleBtn = document.getElementById('menu-toggle-btn');
+
+  menuToggleBtn?.addEventListener('click', () => {
+    const links = Array.from(document.querySelectorAll('.nav a'));
+    if (!links.length) return;
+    categoryCursor = (categoryCursor + 1) % links.length;
+    const link = links[categoryCursor];
+    const targetId = String(link.getAttribute('href') || '').replace('#', '');
+    const target = targetId ? document.getElementById(targetId) : null;
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      links.forEach((l) => l.classList.toggle('active', l === link));
+    }
+  });
 
   authBtn?.addEventListener('click', openAuthModal);
   authClose?.addEventListener('click', closeAuthModal);
   authModal?.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
-  myOrdersModal?.addEventListener('click', (e) => { if (e.target === myOrdersModal) closeMyOrdersModal(); });
 
   document.getElementById('authTabLogin')?.addEventListener('click', () => setAuthMode('login'));
   document.getElementById('authTabRegister')?.addEventListener('click', () => setAuthMode('register'));
@@ -1760,7 +1820,6 @@ async function initAuth() {
     setAccountSection('profile');
   });
   document.getElementById('authProfileSaveBtn')?.addEventListener('click', handleSaveProfile);
-  document.getElementById('myOrdersCloseBtn')?.addEventListener('click', closeMyOrdersModal);
 
   setAuthMode('login');
   setAccountSection('profile');
@@ -1773,16 +1832,29 @@ async function initAuth() {
   const hasHashAccessToken = hash.includes('access_token=');
   const hasQueryAuthCode = urlParams.has('code') || urlParams.has('token_hash');
 
-  if (hasQueryAuthCode) {
+  let recoveryValidationError = null;
+  if (isRecoveryLink) {
     try {
-      await withTimeout(
-        supabaseClient.auth.exchangeCodeForSession(window.location.href),
-        12000,
-        'No se pudo validar el enlace de recuperación.'
-      );
+      if (urlParams.has('code')) {
+        await withTimeout(
+          supabaseClient.auth.exchangeCodeForSession(window.location.href),
+          12000,
+          'No se pudo validar el enlace de recuperación.'
+        );
+      } else if (urlParams.has('token_hash')) {
+        const tokenHash = String(urlParams.get('token_hash') || '').trim();
+        if (tokenHash) {
+          const { error } = await withTimeout(
+            supabaseClient.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash }),
+            12000,
+            'No se pudo validar el enlace de recuperación.'
+          );
+          if (error) throw error;
+        }
+      }
     } catch (error) {
-      console.warn('⚠️ No se pudo intercambiar code/token de recovery:', error?.message || error);
-      setAuthFeedback(friendlyRuntimeError(error, 'No se pudo validar el enlace de recuperación. Solicita otro correo.'), 'error');
+      recoveryValidationError = error;
+      console.warn('⚠️ No se pudo validar enlace de recovery:', error?.message || error);
     }
   }
 
@@ -1796,8 +1868,10 @@ async function initAuth() {
 
     if (authSession?.user) {
       setAuthFeedback('Define tu nueva contraseña para completar la recuperación.', 'info');
-    } else {
+    } else if (recoveryValidationError) {
       setAuthFeedback('No se pudo validar el enlace de recuperación (puede estar vencido o ya usado). Solicita uno nuevo.', 'error');
+    } else {
+      setAuthFeedback('No se detectó una sesión de recuperación válida. Solicita un nuevo correo.', 'error');
     }
   }
 
@@ -1806,6 +1880,26 @@ async function initAuth() {
   }
 
   updateAuthUi();
+
+  const refreshSessionOnWake = async () => {
+    try {
+      await refreshAuthSession();
+    } catch (error) {
+      console.warn('⚠️ No se pudo refrescar sesión al volver de inactividad:', error?.message || error);
+    } finally {
+      recoverInteractiveUiState();
+    }
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshSessionOnWake();
+  });
+
+  window.addEventListener('focus', refreshSessionOnWake);
+  setInterval(() => {
+    if (document.hidden) return;
+    recoverInteractiveUiState();
+  }, 30000);
 
   if ((hasHashAccessToken || hasQueryAuthCode) && authSession?.user && !isRecoveryLink) {
     setAuthMode('login');
@@ -2000,12 +2094,26 @@ async function submitOrder(event) {
 
     console.log('📦 Payload RPC create_order:', getSafeOrderPayloadForLogs(rpcPayload));
 
-    const { data: rpcData, error: rpcError } = await withTimeout(
+    let rpcResult = await withTimeout(
       supabaseClient.rpc('create_order', { payload: rpcPayload }),
       15000,
       'No se pudo crear el pedido por tiempo de espera.'
     );
 
+    if (rpcResult.error && isAuthSessionError(rpcResult.error) && authSession?.user) {
+      const { data: refreshed, error: refreshError } = await supabaseClient.auth.refreshSession();
+      if (refreshError || !refreshed?.session) {
+        throw rpcResult.error;
+      }
+      authSession = refreshed.session;
+      rpcResult = await withTimeout(
+        supabaseClient.rpc('create_order', { payload: rpcPayload }),
+        15000,
+        'No se pudo crear el pedido por tiempo de espera.'
+      );
+    }
+
+    const { data: rpcData, error: rpcError } = rpcResult;
     if (rpcError) throw rpcError;
 
     orderId = rpcData?.order_id || null;
@@ -2113,6 +2221,61 @@ function setupMenuActiveNav(nav, sections = []) {
   if (firstId) activateLink(firstId);
 }
 
+
+function openPlatoModal(item, imageUrl, soldOut = false) {
+  const modal = document.getElementById('platoModal');
+  const name = document.getElementById('platoModalName');
+  const desc = document.getElementById('platoModalDesc');
+  const price = document.getElementById('platoModalPrice');
+  const image = document.getElementById('platoModalImage');
+  const addBtn = document.getElementById('platoModalAddBtn');
+
+  if (!modal || !name || !desc || !price || !image || !addBtn) return;
+
+  name.textContent = item.nombre || 'Plato';
+  desc.textContent = item.descripcion || 'Sin descripción';
+  price.textContent = formatCurrency(item.precio);
+  image.src = imageUrl || 'images/Logos/logo.jpg';
+  image.alt = item.nombre || 'Detalle plato';
+
+  addBtn.disabled = soldOut;
+  addBtn.textContent = soldOut ? 'Agotado' : '+ Agregar';
+  addBtn.onclick = () => {
+    if (soldOut) return;
+    addToCart({
+      id: item.id,
+      nombre: item.nombre,
+      precio: item.precio,
+      imagen: imageUrl
+    });
+    showCartToast(`✅ ${item.nombre} agregado al carrito`);
+    closePlatoModal();
+  };
+
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closePlatoModal() {
+  const modal = document.getElementById('platoModal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function setupMenuSearch() {
+  const input = document.getElementById('menuSearchInput');
+  if (!input) return;
+  input.addEventListener('input', () => cargarMenu());
+}
+
+function setupTopbarShortcuts() {
+  const navCartBtn = document.getElementById('nav-cart-btn');
+  const navAccountBtn = document.getElementById('nav-account-btn');
+  navCartBtn?.addEventListener('click', openCartModal);
+  navAccountBtn?.addEventListener('click', openAuthModal);
+}
+
 // ===============================
 // CARGAR MENÚ Y NAVBAR
 // ===============================
@@ -2136,13 +2299,22 @@ async function cargarMenu() {
 
     if (categoriasError) throw categoriasError;
 
-    platosState = new Map((platosData || []).map((p) => [p.id, p]));
+    menuDataCache = { platos: platosData || [], categorias: categoriasData || [] };
+    platosState = new Map((menuDataCache.platos || []).map((p) => [p.id, p]));
+
+    const searchTerm = String(document.getElementById('menuSearchInput')?.value || '').trim().toLowerCase();
 
     menu.innerHTML = '';
     nav.innerHTML = '';
 
-    categoriasData.forEach(cat => {
-      const items = platosData.filter(p => p.categoria_id === cat.id);
+    menuDataCache.categorias.forEach(cat => {
+      const items = menuDataCache.platos.filter((p) => {
+        if (p.categoria_id !== cat.id) return false;
+        if (!searchTerm) return true;
+        const text = `${p.nombre || ''} ${p.descripcion || ''}`.toLowerCase();
+        return text.includes(searchTerm);
+      });
+      if (!items.length) return;
 
       const navLink = document.createElement('a');
       navLink.href = `#${cat.id}`;
@@ -2172,18 +2344,10 @@ async function cargarMenu() {
             <p>${item.descripcion || ''}</p>
             <span>${formatCurrency(item.precio)}</span>
             ${stockText}
-            <button type="button" class="add-cart-btn" ${soldOut ? 'disabled title="Producto agotado"' : ''}>Agregar al carrito</button>
           `;
 
-          div.querySelector('.add-cart-btn')?.addEventListener('click', () => {
-            if (soldOut) return;
-            addToCart({
-              id: item.id,
-              nombre: item.nombre,
-              precio: item.precio,
-              imagen: imageUrl
-            });
-            showCartToast(`✅ ${item.nombre} agregado al carrito`);
+          div.addEventListener('click', () => {
+            openPlatoModal(item, imageUrl, soldOut);
           });
 
           menu.appendChild(div);
@@ -2195,6 +2359,11 @@ async function cargarMenu() {
         menu.appendChild(emptyDiv);
       }
     });
+
+    if (!menu.querySelector('.section-title')) {
+      menu.innerHTML = '<p>No hay resultados para tu búsqueda.</p>';
+      return;
+    }
 
     const observer = new IntersectionObserver(entries => {
       entries.forEach(e => {
@@ -2229,6 +2398,13 @@ window.addEventListener('load', async () => {
   loadCart();
   setupCartModalEvents();
   setupTrackingEvents();
+  setupTopbarShortcuts();
+  setupMenuSearch();
+
+  const platoModal = document.getElementById('platoModal');
+  document.getElementById('platoModalClose')?.addEventListener('click', closePlatoModal);
+  platoModal?.addEventListener('click', (e) => { if (e.target === platoModal) closePlatoModal(); });
+
   await initAuth();
   updateDireccionRequired();
   updateCartBadge();
