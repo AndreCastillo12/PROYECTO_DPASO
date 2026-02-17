@@ -39,6 +39,10 @@ let authFeedbackTimer = null;
 let authActiveSection = 'profile';
 let menuDataCache = { platos: [], categorias: [] };
 let categoryCursor = -1;
+const menuRowControllers = new Set();
+const uiBusyOps = new Set();
+let topbarShortcutsReady = false;
+let authInitReady = false;
 
 function getAuthRedirectUrl() {
   return `${window.location.origin}${window.location.pathname}`;
@@ -48,14 +52,53 @@ function getRecoveryRedirectUrl() {
   return `${getAuthRedirectUrl()}?mode=recovery`;
 }
 
-function withTimeout(promise, timeoutMs = 12000, timeoutMessage = 'La operación tardó demasiado. Intenta nuevamente.') {
-  let timerId;
-  const timeoutPromise = new Promise((_, reject) => {
-    timerId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
-  });
-
-  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timerId));
+function isTransientRequestError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('network')
+    || message.includes('fetch')
+    || message.includes('timed out')
+    || message.includes('timeout')
+    || message.includes('connection')
+  );
 }
+
+async function runRequestWithPolicy(task, {
+  timeoutMs = 12000,
+  timeoutMessage = 'La operación tardó demasiado. Intenta nuevamente.',
+  retries = 0
+} = {}) {
+  let attempt = 0;
+  let lastError = null;
+
+  while (attempt <= retries) {
+    try {
+      let timerId;
+      const timeoutPromise = new Promise((_, reject) => {
+        timerId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      });
+      const result = await Promise.race([Promise.resolve().then(task), timeoutPromise]);
+      clearTimeout(timerId);
+      return result;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= retries || !isTransientRequestError(error)) break;
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    attempt += 1;
+  }
+
+  throw lastError || new Error(timeoutMessage);
+}
+
+function withTimeout(promise, timeoutMs = 12000, timeoutMessage = 'La operación tardó demasiado. Intenta nuevamente.') {
+  return runRequestWithPolicy(() => promise, {
+    timeoutMs,
+    timeoutMessage,
+    retries: 1
+  });
+}
+
 
 function splitFullName(raw = '') {
   const clean = String(raw || '').trim().replace(/\s+/g, ' ');
@@ -189,6 +232,14 @@ function normalizeModalidad(rawValue) {
 // ===============================
 function formatCurrency(value) {
   return `S/ ${Number(value).toFixed(2)}`;
+}
+
+function normalizeSearchText(text = '') {
+  return String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
 }
 
 function getCartItemAvailability(item) {
@@ -1420,6 +1471,28 @@ function normalizeDniInput(raw = '') {
   return String(raw || '').replace(/\D/g, '').slice(0, 8);
 }
 
+function getProfileAvatarUrl() {
+  return String(
+    authProfile?.avatar_url
+    || authSession?.user?.user_metadata?.avatar_url
+    || ''
+  ).trim();
+}
+
+function applyProfileAvatar(profileAvatar, label = '👤', avatarUrl = '') {
+  if (!profileAvatar) return;
+  if (avatarUrl) {
+    profileAvatar.textContent = '';
+    profileAvatar.style.backgroundImage = `url(${avatarUrl})`;
+    profileAvatar.style.backgroundSize = 'cover';
+    profileAvatar.style.backgroundPosition = 'center';
+    return;
+  }
+  profileAvatar.style.backgroundImage = 'none';
+  profileAvatar.textContent = label || '👤';
+}
+
+
 function setAccountSection(section = 'profile') {
   const safeSection = section === 'orders' ? 'orders' : 'profile';
   authActiveSection = safeSection;
@@ -1428,6 +1501,11 @@ function setAccountSection(section = 'profile') {
   const editProfileBtn = document.getElementById('authEditProfileBtn');
   myOrdersBtn?.classList.toggle('active', safeSection === 'orders');
   editProfileBtn?.classList.toggle('active', safeSection === 'profile');
+
+  myOrdersBtn?.classList.toggle('tracking-primary', safeSection === 'orders');
+  myOrdersBtn?.classList.toggle('tracking-ghost', safeSection !== 'orders');
+  editProfileBtn?.classList.toggle('tracking-primary', safeSection === 'profile');
+  editProfileBtn?.classList.toggle('tracking-ghost', safeSection !== 'profile');
 
   const profileView = document.getElementById('authProfileView');
   const ordersView = document.getElementById('authOrdersView');
@@ -1460,6 +1538,8 @@ function updateAuthUi() {
   const profilePhone = document.getElementById('authProfilePhone');
   const profileDni = document.getElementById('authProfileDni');
   const profileEmail = document.getElementById('authProfileEmail');
+  const profileAvatar = document.getElementById('authProfileAvatar');
+  const profileEmailStatus = document.getElementById('authProfileEmailStatus');
 
   const isLogged = Boolean(authSession?.user);
   const forceLoggedOutUi = authRecoveryMode === true;
@@ -1471,8 +1551,8 @@ function updateAuthUi() {
     const email = authSession?.user?.email || authProfile?.email || '-';
     const fullName = authProfile?.name || authSession?.user?.user_metadata?.name || 'Cliente';
     const { firstName, lastName } = splitFullName(fullName);
-    if (authUserInfo) authUserInfo.textContent = `${fullName} · ${email}`;
-    if (authWelcome) authWelcome.textContent = 'Tu sesión está activa. Puedes comprar, editar tu perfil y revisar historial.';
+    if (authUserInfo) authUserInfo.textContent = '';
+    if (authWelcome) authWelcome.textContent = '';
     if (authFloatLabel) authFloatLabel.textContent = 'Mi cuenta';
     if (topbarAccountLabel) topbarAccountLabel.textContent = 'Mi cuenta';
     if (profileFirstName) profileFirstName.value = firstName;
@@ -1480,6 +1560,15 @@ function updateAuthUi() {
     if (profilePhone) profilePhone.value = normalizePhoneInput(authProfile?.phone || authSession?.user?.user_metadata?.phone || '');
     if (profileDni) profileDni.value = normalizeDniInput(authProfile?.dni || authSession?.user?.user_metadata?.dni || '');
     if (profileEmail) profileEmail.value = email === '-' ? '' : email;
+    if (profileAvatar) {
+      const initials = `${firstName?.[0] || ''}${lastName?.[0] || ''}`.trim().toUpperCase();
+      applyProfileAvatar(profileAvatar, initials || '👤', getProfileAvatarUrl());
+    }
+    if (profileEmailStatus) {
+      const verified = Boolean(authSession?.user?.email_confirmed_at);
+      profileEmailStatus.textContent = verified ? 'Correo verificado' : 'Correo pendiente';
+      profileEmailStatus.classList.toggle('pending', !verified);
+    }
     setAccountSection(authActiveSection || 'profile');
     fillCheckoutFromAuth();
   } else {
@@ -1489,9 +1578,16 @@ function updateAuthUi() {
         ? 'Estás en recuperación de contraseña. Define tu nueva clave.'
         : 'Compra como invitado o ingresa para ver tu historial.';
     }
+    if (profileAvatar) applyProfileAvatar(profileAvatar, '👤', '');
+    if (profileEmailStatus) {
+      profileEmailStatus.textContent = 'Correo verificado';
+      profileEmailStatus.classList.remove('pending');
+    }
     if (authFloatLabel) authFloatLabel.textContent = 'Ingresar';
-    if (topbarAccountLabel) topbarAccountLabel.textContent = 'Mi cuenta';
+    if (topbarAccountLabel) topbarAccountLabel.textContent = 'Iniciar sesión';
   }
+
+  renderTopbarAccountMenu();
 }
 
 function openAuthModal() {
@@ -1586,48 +1682,131 @@ async function handleResetPasswordUpdate() {
 }
 
 async function handleSaveProfile() {
+  if (!beginUiOp('save-profile')) return;
+  const saveBtn = document.getElementById('authProfileSaveBtn');
+
   try {
     const session = await refreshAuthSession();
-  if (!session?.user?.id) {
-    setAuthFeedback('Tu sesión expiró. Inicia sesión nuevamente.', 'error');
-    return;
-  }
+    if (!session?.user?.id) {
+      setAuthFeedback('Tu sesión expiró. Inicia sesión nuevamente.', 'error');
+      return;
+    }
 
-  const firstName = String(document.getElementById('authProfileFirstName')?.value || '').trim();
-  const lastName = String(document.getElementById('authProfileLastName')?.value || '').trim();
-  const phone = normalizePhoneInput(document.getElementById('authProfilePhone')?.value || '');
-  const dni = normalizeDniInput(document.getElementById('authProfileDni')?.value || '');
-  const fullName = buildFullName(firstName, lastName);
+    const firstName = String(document.getElementById('authProfileFirstName')?.value || '').trim();
+    const lastName = String(document.getElementById('authProfileLastName')?.value || '').trim();
+    const phone = normalizePhoneInput(document.getElementById('authProfilePhone')?.value || '');
+    const dni = normalizeDniInput(document.getElementById('authProfileDni')?.value || '');
+    const fullName = buildFullName(firstName, lastName);
+    const photoFile = document.getElementById('authProfilePhoto')?.files?.[0] || null;
 
-  if (!firstName || !lastName || !phone || phone.length !== 9 || dni.length !== 8) {
-    setAuthFeedback('Completa nombres, apellidos, teléfono (9) y DNI (8) válidos.', 'error');
-    return;
-  }
+    if (!firstName || !lastName || !phone || phone.length !== 9 || dni.length !== 8) {
+      setAuthFeedback('Completa nombres, apellidos, teléfono (9) y DNI (8) válidos.', 'error');
+      return;
+    }
 
-  const { data, error } = await withTimeout(
-    supabaseClient.rpc('rpc_upsert_my_customer_profile', {
-      p_name: fullName,
-      p_phone: phone,
-      p_dni: dni,
-    }),
-    12000,
-    'No se pudo guardar perfil. Intenta nuevamente.'
-  );
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Guardando...';
+    }
 
-  if (error) {
-    setAuthFeedback(error.message || 'No se pudo guardar perfil.', 'error');
-    return;
-  }
+    let avatarUrl = getProfileAvatarUrl();
+    if (photoFile) {
+      if (!String(photoFile.type || '').startsWith('image/')) {
+        setAuthFeedback('El archivo debe ser una imagen válida.', 'error');
+        return;
+      }
+      if (Number(photoFile.size || 0) > 2 * 1024 * 1024) {
+        setAuthFeedback('La imagen no debe superar 2MB.', 'error');
+        return;
+      }
 
-  authProfile = data || authProfile;
+      const safeName = String(photoFile.name || 'avatar.jpg').replace(/[^a-zA-Z0-9_.-]/g, '_');
+      const avatarPath = `${session.user.id}/${Date.now()}_${safeName}`;
+
+      const { error: uploadError } = await withTimeout(
+        supabaseClient.storage.from('avatars').upload(avatarPath, photoFile, {
+          cacheControl: '3600',
+          upsert: true
+        }),
+        20000,
+        'La subida de la foto tardó demasiado.'
+      );
+      if (uploadError) {
+        setAuthFeedback(`No se pudo subir foto: ${uploadError.message || 'error de storage'}`, 'error');
+        return;
+      }
+
+      const { data: publicData } = supabaseClient.storage.from('avatars').getPublicUrl(avatarPath);
+      avatarUrl = String(publicData?.publicUrl || '').trim();
+
+      const { error: userMetaError } = await withTimeout(
+        supabaseClient.auth.updateUser({
+          data: {
+            avatar_url: avatarUrl,
+            avatar_path: avatarPath
+          }
+        }),
+        12000,
+        'No se pudo guardar metadata de avatar.'
+      );
+      if (userMetaError) {
+        setAuthFeedback(`La foto subió pero no se pudo vincular al perfil: ${userMetaError.message || 'error de metadata'}`, 'error');
+        return;
+      }
+    }
+
+    const { data, error } = await withTimeout(
+      supabaseClient.rpc('rpc_upsert_my_customer_profile', {
+        p_name: fullName,
+        p_phone: phone,
+        p_dni: dni,
+      }),
+      12000,
+      'No se pudo guardar perfil. Intenta nuevamente.'
+    );
+
+    if (error) {
+      setAuthFeedback(error.message || 'No se pudo guardar perfil.', 'error');
+      return;
+    }
+
+    authProfile = data || authProfile;
+    if (avatarUrl) {
+      authProfile = {
+        ...(authProfile || {}),
+        avatar_url: avatarUrl
+      };
+    }
+
+    await refreshAuthSession();
     updateAuthUi();
     setAuthFeedback('Perfil actualizado ✅', 'success');
   } catch (error) {
     setAuthFeedback(friendlyRuntimeError(error, 'No se pudo guardar perfil.'), 'error');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Guardar perfil';
+    }
+    endUiOp('save-profile');
   }
 }
 
+
+function beginUiOp(opKey = '') {
+  if (!opKey) return true;
+  if (uiBusyOps.has(opKey)) return false;
+  uiBusyOps.add(opKey);
+  return true;
+}
+
+function endUiOp(opKey = '') {
+  if (!opKey) return;
+  uiBusyOps.delete(opKey);
+}
+
 async function handleRegister() {
+  if (!beginUiOp('register')) return;
   try {
     const firstName = String(document.getElementById('authRegisterFirstName')?.value || '').trim();
   const lastName = String(document.getElementById('authRegisterLastName')?.value || '').trim();
@@ -1670,10 +1849,15 @@ async function handleRegister() {
   setAuthFeedback('Te enviamos un correo de verificación. Revisa tu bandeja.', 'success');
   } catch (error) {
     setAuthFeedback(friendlyRuntimeError(error, 'No se pudo crear la cuenta.'), 'error');
+  } finally {
+    endUiOp('register');
   }
 }
 
 async function handleLogin() {
+  if (!beginUiOp('login')) return;
+  const loginBtn = document.getElementById('authLoginBtn');
+  if (loginBtn) loginBtn.disabled = true;
   try {
     const email = String(document.getElementById('authLoginEmail')?.value || '').trim().toLowerCase();
   const password = String(document.getElementById('authLoginPassword')?.value || '').trim();
@@ -1696,6 +1880,9 @@ async function handleLogin() {
     closeAuthModal();
   } catch (error) {
     setAuthFeedback(friendlyRuntimeError(error, 'No se pudo iniciar sesión.'), 'error');
+  } finally {
+    if (loginBtn) loginBtn.disabled = false;
+    endUiOp('login');
   }
 }
 
@@ -1752,6 +1939,9 @@ async function handleGoogleLogin() {
 }
 
 async function handleLogout() {
+  if (!beginUiOp('logout')) return;
+  const logoutBtn = document.getElementById('authLogoutBtn');
+  if (logoutBtn) logoutBtn.disabled = true;
   let signOutError = null;
 
   try {
@@ -1782,14 +1972,20 @@ async function handleLogout() {
 
   if (signOutError) {
     setAuthFeedback(`Sesión local cerrada. ${friendlyRuntimeError(signOutError, friendlyAuthError(signOutError))}`, 'info');
-    return;
+  } else {
+    setAuthMode('login');
+    setAuthFeedback('Sesión cerrada ✅', 'success');
   }
 
-  setAuthMode('login');
-  setAuthFeedback('Sesión cerrada ✅', 'success');
+  if (logoutBtn) logoutBtn.disabled = false;
+  endUiOp('logout');
 }
 
+
 async function initAuth() {
+  if (authInitReady) return;
+  authInitReady = true;
+
   const authBtn = document.getElementById('auth-float-btn');
   const authClose = document.getElementById('authCloseBtn');
   const authModal = document.getElementById('authModal');
@@ -1817,6 +2013,7 @@ async function initAuth() {
   document.getElementById('authRegisterBtn')?.addEventListener('click', handleRegister);
   document.getElementById('authLoginBtn')?.addEventListener('click', handleLogin);
   document.getElementById('authGoogleBtn')?.addEventListener('click', handleGoogleLogin);
+  document.getElementById('authGoogleRegisterBtn')?.addEventListener('click', handleGoogleLogin);
   document.getElementById('authResetLink')?.addEventListener('click', handleResetPassword);
   document.getElementById('authResetSaveBtn')?.addEventListener('click', handleResetPasswordUpdate);
   document.getElementById('authLogoutBtn')?.addEventListener('click', handleLogout);
@@ -2227,6 +2424,235 @@ function setupMenuActiveNav(nav, sections = []) {
 }
 
 
+
+function destroyMenuRowControllers() {
+  menuRowControllers.forEach((controller) => {
+    try { controller.destroy(); } catch (_err) { /* noop */ }
+  });
+  menuRowControllers.clear();
+}
+
+
+
+function initMenuRowCarousel(row) {
+  if (!row) return null;
+
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let originals = Array.from(row.children).filter((el) => !el.hasAttribute('data-carousel-clone'));
+  if (!originals.length) return null;
+
+  let isPointerDown = false;
+  let lastPointerX = 0;
+  let pauseAutoUntil = 0;
+  let rafId = 0;
+  let isHovering = false;
+  let lastFrameAt = 0;
+  let resizeRafId = 0;
+  let autoEnabled = false;
+  let originalWidth = 0;
+
+  const cleanupClones = () => {
+    Array.from(row.querySelectorAll('[data-carousel-clone="true"]')).forEach((clone) => clone.remove());
+  };
+
+  const normalizeCircularScroll = () => {
+    if (!autoEnabled || originalWidth <= 1) return;
+    if (row.scrollLeft >= originalWidth) row.scrollLeft -= originalWidth;
+    if (row.scrollLeft < 0) row.scrollLeft += originalWidth;
+  };
+
+  const pauseAuto = (ms = 1800) => {
+    pauseAutoUntil = Date.now() + ms;
+  };
+
+  const rebuild = () => {
+    cleanupClones();
+    originals = Array.from(row.children).filter((el) => !el.hasAttribute('data-carousel-clone'));
+    originalWidth = row.scrollWidth;
+    const hasOverflow = originalWidth > (row.clientWidth + 2);
+
+    autoEnabled = hasOverflow && !reducedMotion;
+
+    if (autoEnabled) {
+      const frag = document.createDocumentFragment();
+      originals.forEach((card) => {
+        const clone = card.cloneNode(true);
+        clone.setAttribute('data-carousel-clone', 'true');
+        clone.setAttribute('aria-hidden', 'true');
+        clone.querySelectorAll('button, a, input, select, textarea').forEach((el) => {
+          el.tabIndex = -1;
+          el.setAttribute('aria-hidden', 'true');
+        });
+        frag.appendChild(clone);
+      });
+      row.appendChild(frag);
+    }
+
+    row.classList.toggle('auto-carousel', autoEnabled);
+    row.scrollLeft = 0;
+
+    // Recalcular una vez que cargan imágenes para no errar overflow inicial.
+    row.querySelectorAll('img').forEach((img) => {
+      if (img.complete) return;
+      img.addEventListener('load', handleResize, { once: true });
+      img.addEventListener('error', handleResize, { once: true });
+    });
+
+    row.querySelectorAll('.plato-add-mini').forEach((btn) => {
+      if (btn.dataset.quickAddBound === 'true') return;
+      btn.dataset.quickAddBound = 'true';
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (btn.hasAttribute('disabled')) return;
+        const card = btn.closest('.plato');
+        if (!card) return;
+        addToCart({
+          id: card.dataset.platoId,
+          nombre: card.dataset.platoNombre,
+          precio: Number(card.dataset.platoPrecio || 0),
+          imagen: card.dataset.platoImagen || 'images/Logos/logo.jpg'
+        });
+        showCartToast(`✅ ${card.dataset.platoNombre || 'Plato'} agregado al carrito`);
+      });
+    });
+  };
+
+  const runAutoScroll = (time) => {
+    if (!lastFrameAt) lastFrameAt = time;
+    const deltaMs = Math.min(32, Math.max(0, time - lastFrameAt));
+    lastFrameAt = time;
+
+    if (autoEnabled && !isPointerDown && !isHovering && Date.now() >= pauseAutoUntil) {
+      const pxPerSecond = 34;
+      row.scrollLeft += (pxPerSecond * deltaMs) / 1000;
+      normalizeCircularScroll();
+    }
+
+    rafId = window.requestAnimationFrame(runAutoScroll);
+  };
+
+  const handlePointerDown = (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea')) return;
+    isPointerDown = true;
+    pauseAuto(2400);
+    row.dataset.dragging = 'false';
+    lastPointerX = event.clientX;
+    row.classList.add('dragging');
+    row.setPointerCapture?.(event.pointerId);
+  };
+
+  const handlePointerMove = (event) => {
+    if (!isPointerDown) return;
+    const deltaX = event.clientX - lastPointerX;
+    if (Math.abs(deltaX) > 2) row.dataset.dragging = 'true';
+    row.scrollLeft -= deltaX * 1.35;
+    normalizeCircularScroll();
+    lastPointerX = event.clientX;
+  };
+
+  const releaseDrag = () => {
+    if (!isPointerDown) return;
+    isPointerDown = false;
+    row.classList.remove('dragging');
+    pauseAuto(1800);
+    window.setTimeout(() => { delete row.dataset.dragging; }, 80);
+  };
+
+  const handleWheel = (event) => {
+    const absX = Math.abs(event.deltaX);
+    const absY = Math.abs(event.deltaY);
+
+    if (!event.shiftKey && absY >= (absX * 1.2)) {
+      pauseAuto(1200);
+      return; // respetar scroll vertical de página
+    }
+
+    const horizontalDelta = absX > 0 ? event.deltaX : event.deltaY;
+    row.scrollLeft += horizontalDelta * 1.1;
+    normalizeCircularScroll();
+    pauseAuto(1600);
+    event.preventDefault();
+  };
+
+  const handleClickCapture = (event) => {
+    if (row.dataset.dragging === 'true') {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
+  const handleRowClick = (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+
+    const addBtn = target.closest('.plato-add-mini');
+    const platoCard = target.closest('.plato');
+    if (!platoCard || !row.contains(platoCard)) return;
+
+    if (addBtn) return;
+
+    if (target.closest('button, a, input, select, textarea')) return;
+
+    // En card evitamos abrir modal; el agregado es directo por botón sutil.
+    return;
+  };
+
+  const handleResize = () => {
+    if (resizeRafId) window.cancelAnimationFrame(resizeRafId);
+    resizeRafId = window.requestAnimationFrame(() => {
+      rebuild();
+      pauseAuto(900);
+    });
+  };
+
+  row.addEventListener('pointerdown', handlePointerDown);
+  row.addEventListener('pointermove', handlePointerMove);
+  row.addEventListener('pointerup', releaseDrag);
+  row.addEventListener('pointercancel', releaseDrag);
+  row.addEventListener('pointerleave', releaseDrag);
+  row.addEventListener('click', handleClickCapture, true);
+  row.addEventListener('click', handleRowClick);
+  row.addEventListener('wheel', handleWheel, { passive: false });
+  row.addEventListener('mouseenter', () => { isHovering = true; });
+  row.addEventListener('mouseleave', () => { isHovering = false; pauseAuto(900); });
+  row.addEventListener('touchstart', () => pauseAuto(1700), { passive: true });
+  window.addEventListener('resize', handleResize);
+
+  rebuild();
+  rafId = window.requestAnimationFrame(runAutoScroll);
+
+  return {
+    destroy() {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      if (resizeRafId) window.cancelAnimationFrame(resizeRafId);
+      window.removeEventListener('resize', handleResize);
+      row.removeEventListener('pointerdown', handlePointerDown);
+      row.removeEventListener('pointermove', handlePointerMove);
+      row.removeEventListener('pointerup', releaseDrag);
+      row.removeEventListener('pointercancel', releaseDrag);
+      row.removeEventListener('pointerleave', releaseDrag);
+      row.removeEventListener('click', handleClickCapture, true);
+      row.removeEventListener('click', handleRowClick);
+      row.removeEventListener('wheel', handleWheel);
+      row.classList.remove('dragging', 'auto-carousel');
+      cleanupClones();
+      delete row.dataset.dragging;
+      row.scrollLeft = 0;
+    }
+  };
+}
+
+function setupMenuRowDragScroll(rows = []) {
+  destroyMenuRowControllers();
+  rows.forEach((row) => {
+    const controller = initMenuRowCarousel(row);
+    if (controller) menuRowControllers.add(controller);
+  });
+}
+
+
 function openPlatoModal(item, imageUrl, soldOut = false) {
   const modal = document.getElementById('platoModal');
   const name = document.getElementById('platoModalName');
@@ -2272,6 +2698,8 @@ function setupMenuSearch() {
   const input = document.getElementById('menuSearchInput');
   if (!input) return;
 
+  input.value = '';
+
   input.addEventListener('input', () => {
     cargarMenu();
   });
@@ -2284,14 +2712,40 @@ function setupMenuSearch() {
   });
 }
 
+
+function renderTopbarAccountMenu() {
+  const topbarAccountLabel = document.getElementById('topbar-account-label');
+  const menu = document.getElementById('nav-account-menu');
+  const isLogged = Boolean(authSession?.user) && !authRecoveryMode;
+
+  if (topbarAccountLabel) {
+    topbarAccountLabel.textContent = isLogged ? 'Mi cuenta' : 'Iniciar sesión';
+  }
+
+  if (!menu) return;
+
+  menu.innerHTML = isLogged
+    ? `
+      <button id="nav-profile-direct" type="button">Mi perfil</button>
+      <button id="nav-orders-direct" type="button">Historial de pedidos</button>
+      <button id="nav-logout-direct" type="button">Cerrar sesión</button>
+    `
+    : `
+      <button id="nav-login-direct" type="button">Iniciar sesión</button>
+      <button id="nav-register-direct" type="button">Registrarse</button>
+    `;
+}
+
 function setupTopbarShortcuts() {
+  if (topbarShortcutsReady) return;
+  topbarShortcutsReady = true;
+
   const navCartBtn = document.getElementById('nav-cart-btn');
   const navAccountBtn = document.getElementById('nav-account-btn');
   const navTrackingBtn = document.getElementById('nav-tracking-btn');
   const menu = document.getElementById('nav-account-menu');
-  const loginBtn = document.getElementById('nav-login-direct');
-  const registerBtn = document.getElementById('nav-register-direct');
 
+  renderTopbarAccountMenu();
   navCartBtn?.addEventListener('click', openCartModal);
   navTrackingBtn?.addEventListener('click', () => openTrackingModal());
 
@@ -2301,14 +2755,40 @@ function setupTopbarShortcuts() {
     if (menu) menu.setAttribute('aria-hidden', menu.classList.contains('open') ? 'false' : 'true');
   });
 
-  loginBtn?.addEventListener('click', () => {
-    menu?.classList.remove('open');
-    openAuthModalInMode('login');
-  });
+  menu?.addEventListener('click', async (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
 
-  registerBtn?.addEventListener('click', () => {
-    menu?.classList.remove('open');
-    openAuthModalInMode('register');
+    if (target.id === 'nav-login-direct') {
+      menu.classList.remove('open');
+      openAuthModalInMode('login');
+      return;
+    }
+
+    if (target.id === 'nav-register-direct') {
+      menu.classList.remove('open');
+      openAuthModalInMode('register');
+      return;
+    }
+
+    if (target.id === 'nav-profile-direct') {
+      menu.classList.remove('open');
+      setAccountSection('profile');
+      openAuthModal();
+      return;
+    }
+
+    if (target.id === 'nav-orders-direct') {
+      menu.classList.remove('open');
+      openAuthModal();
+      await openMyOrdersModal();
+      return;
+    }
+
+    if (target.id === 'nav-logout-direct') {
+      menu.classList.remove('open');
+      await handleLogout();
+    }
   });
 
   document.addEventListener('click', (e) => {
@@ -2346,8 +2826,9 @@ async function cargarMenu() {
     menuDataCache = { platos: platosData || [], categorias: categoriasData || [] };
     platosState = new Map((menuDataCache.platos || []).map((p) => [p.id, p]));
 
-    const searchTerm = String(document.getElementById('menuSearchInput')?.value || '').trim().toLowerCase();
+    const searchTerm = normalizeSearchText(document.getElementById('menuSearchInput')?.value || '');
 
+    destroyMenuRowControllers();
     menu.innerHTML = '';
     nav.innerHTML = '';
 
@@ -2355,7 +2836,7 @@ async function cargarMenu() {
       const items = menuDataCache.platos.filter((p) => {
         if (p.categoria_id !== cat.id) return false;
         if (!searchTerm) return true;
-        const text = `${p.nombre || ''} ${p.descripcion || ''}`.toLowerCase();
+        const text = normalizeSearchText(`${p.nombre || ''} ${p.descripcion || ''} ${cat.nombre || ''}`);
         return text.includes(searchTerm);
       });
       if (!items.length) return;
@@ -2393,12 +2874,16 @@ async function cargarMenu() {
             <h3>${item.nombre}</h3>
             <p>${item.descripcion || ''}</p>
             <span>${formatCurrency(item.precio)}</span>
+            <button class="plato-add-mini" type="button" aria-label="Agregar ${item.nombre} al pedido" ${soldOut ? 'disabled' : ''}>＋ Agregar</button>
             ${stockText}
           `;
 
-          div.addEventListener('click', () => {
-            openPlatoModal(item, imageUrl, soldOut);
-          });
+          div.dataset.platoId = item.id || '';
+          div.dataset.platoNombre = item.nombre || 'Plato';
+          div.dataset.platoDesc = item.descripcion || '';
+          div.dataset.platoPrecio = String(Number(item.precio || 0));
+          div.dataset.platoImagen = imageUrl;
+          div.dataset.platoSoldout = soldOut ? 'true' : 'false';
 
           row.appendChild(div);
         });
@@ -2409,6 +2894,7 @@ async function cargarMenu() {
     });
 
     if (!menu.querySelector('.section-title')) {
+      destroyMenuRowControllers();
       menu.innerHTML = '<p>No hay resultados para tu búsqueda. Prueba con otro término.</p>';
       return;
     }
@@ -2425,9 +2911,13 @@ async function cargarMenu() {
     const sectionTitles = Array.from(menu.querySelectorAll('.section-title'));
     setupMenuActiveNav(nav, sectionTitles);
 
+    const menuRows = Array.from(menu.querySelectorAll('.menu-row'));
+    setupMenuRowDragScroll(menuRows);
+
     document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
   } catch (err) {
     console.error('❌ Error cargando menú:', err);
+    destroyMenuRowControllers();
     menu.innerHTML = '<p>Error cargando el menú. Revisa la consola.</p>';
   }
 }
