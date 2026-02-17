@@ -3,6 +3,8 @@ import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import { exportRowsToCsv } from "../utils/csv";
+import { logTelemetryEvent } from "../utils/telemetry";
+import { readAdminPreference, saveAdminPreference } from "../utils/adminPreferences";
 
 const REPORT_TYPES = [
   { value: "day", label: "Ventas por día" },
@@ -30,9 +32,12 @@ export default function Reportes() {
   const [rows, setRows] = useState([]);
   const [kpis, setKpis] = useState({ totalSales: 0, totalOrders: 0, ticketPromedio: 0, cancelPct: 0 });
 
-  const [dateFrom, setDateFrom] = useState(toDateInput(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)));
-  const [dateTo, setDateTo] = useState(toDateInput(new Date()));
-  const [groupBy, setGroupBy] = useState("day");
+  const defaultPrefs = readAdminPreference("reportes_filters", null);
+  const defaultTo = toDateInput(new Date());
+  const defaultFrom = toDateInput(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
+  const [dateFrom, setDateFrom] = useState(defaultPrefs?.dateFrom || defaultFrom);
+  const [dateTo, setDateTo] = useState(defaultPrefs?.dateTo || defaultTo);
+  const [groupBy, setGroupBy] = useState(defaultPrefs?.groupBy || "day");
 
   async function loadReport() {
     setLoading(true);
@@ -46,7 +51,8 @@ export default function Reportes() {
     });
 
     if (error) {
-      showToast(error.message || "No se pudo cargar reporte", "error");
+      logTelemetryEvent({ level: "error", area: "reportes", event: "rpc_sales_report_failed", message: error.message || "No se pudo cargar reporte", meta: { code: error.code, groupBy } });
+      showToast(error.message || "No se pudo cargar reporte. Intenta nuevamente.", "error");
       setRows([]);
       setLoading(false);
       return;
@@ -61,7 +67,8 @@ export default function Reportes() {
       .lte("created_at", toIso);
 
     if (kpiError) {
-      showToast("No se pudieron calcular KPIs", "warning");
+      logTelemetryEvent({ level: "warning", area: "reportes", event: "load_kpis_failed", message: kpiError.message || "No se pudieron calcular KPIs", meta: { code: kpiError.code } });
+      showToast("No se pudieron calcular KPIs. Revisa la conexión e intenta nuevamente.", "warning");
     } else {
       const safeOrders = kpiOrders || [];
       const totalOrders = safeOrders.length;
@@ -83,6 +90,10 @@ export default function Reportes() {
     loadReport();
   }, []);
 
+  useEffect(() => {
+    saveAdminPreference("reportes_filters", { dateFrom, dateTo, groupBy });
+  }, [dateFrom, dateTo, groupBy]);
+
   const csvRows = useMemo(() => {
     return rows.map((r) => [r.label, Number(r.total_sales || 0), Number(r.orders_count || 0), Number(r.total_qty || 0)]);
   }, [rows]);
@@ -98,7 +109,7 @@ export default function Reportes() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <Toast toast={toast} />
-      <h2 style={{ margin: 0 }}>Reportes</h2>
+      <h2 style={{ margin: 0 }}>Reportes {loading && rows.length > 0 ? "· Actualizando..." : ""}</h2>
 
       <section style={cardStyle}>
         <div style={filtersGrid}>

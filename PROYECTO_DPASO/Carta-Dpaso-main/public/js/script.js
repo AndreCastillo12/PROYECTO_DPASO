@@ -37,6 +37,8 @@ let authMode = 'login';
 let authRecoveryMode = false;
 let authFeedbackTimer = null;
 let authActiveSection = 'profile';
+let menuDataCache = { platos: [], categorias: [] };
+let categoryCursor = -1;
 
 function getAuthRedirectUrl() {
   return `${window.location.origin}${window.location.pathname}`;
@@ -75,6 +77,50 @@ async function refreshAuthSession() {
   );
   authSession = data?.session || null;
   return authSession;
+}
+
+function isAuthSessionError(error) {
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('jwt')
+    || message.includes('expired')
+    || message.includes('token')
+    || code === 'PGRST301'
+    || code === 'PGRST302'
+    || code === '42501'
+  );
+}
+
+function recoverInteractiveUiState() {
+  const confirmBtn = document.getElementById('confirm-order-btn');
+  const trackingRefreshBtn = document.getElementById('trackingRefreshBtn');
+  const trackingCodeInput = document.getElementById('trackingCode');
+  const loader = document.getElementById('loader');
+
+  if (loader?.classList && !loader.classList.contains('hide')) {
+    loader.classList.add('hide');
+  }
+
+  if (confirmBtn && !orderSubmitBusy) {
+    confirmBtn.disabled = false;
+    if (!String(confirmBtn.textContent || '').includes('Confirmar')) {
+      confirmBtn.textContent = 'Confirmar pedido';
+    }
+  }
+
+  if (trackingRefreshBtn) {
+    const hasCode = String(trackingCodeInput?.value || '').trim().length >= 6;
+    trackingRefreshBtn.disabled = !hasCode;
+  }
+
+  if (typeof updateCartTotalsAndAvailability === 'function') {
+    try {
+      updateCartTotalsAndAvailability();
+    } catch (_e) {
+      // noop: no romper la UI por una recuperación preventiva
+    }
+  }
 }
 
 function friendlyRuntimeError(error, fallback = 'No se pudo completar la acción.') {
@@ -970,9 +1016,16 @@ function toggleCheckoutSection(forceOpen = false) {
 }
 
 function updateCartBadge() {
+  const count = getCartCount();
+  const subtotal = formatCurrency(getSubtotal());
   const badge = document.getElementById('cart-badge');
-  if (!badge) return;
-  badge.textContent = getCartCount();
+  const navBadge = document.getElementById('nav-cart-badge');
+  const stickyCount = document.getElementById('cartStickyCount');
+  const stickySubtotal = document.getElementById('cartStickySubtotal');
+  if (badge) badge.textContent = count;
+  if (navBadge) navBadge.textContent = count;
+  if (stickyCount) stickyCount.textContent = `${count} item${count === 1 ? '' : 's'}`;
+  if (stickySubtotal) stickySubtotal.textContent = subtotal;
 }
 
 async function refreshCartAvailability() {
@@ -1209,7 +1262,7 @@ function updateDireccionRequired() {
 
 
 function setupCartModalEvents() {
-  const cartButton = document.getElementById('cart-float-btn');
+  const cartButton = document.getElementById('cart-float-btn') || document.getElementById('nav-cart-btn');
   const closeButton = document.getElementById('cart-close-btn');
   const modal = document.getElementById('cart-modal');
   const itemsContainer = document.getElementById('cart-items');
@@ -1382,8 +1435,12 @@ function setAccountSection(section = 'profile') {
   editProfileBtn?.classList.toggle('active', safeSection === 'profile');
 
   const profileView = document.getElementById('authProfileView');
+  const ordersView = document.getElementById('authOrdersView');
   if (profileView) {
     profileView.style.display = safeSection === 'profile' ? 'block' : 'none';
+  }
+  if (ordersView) {
+    ordersView.style.display = safeSection === 'orders' ? 'block' : 'none';
   }
 }
 
@@ -1402,6 +1459,7 @@ function updateAuthUi() {
   const authUserInfo = document.getElementById('authUserInfo');
   const authWelcome = document.getElementById('authWelcome');
   const authFloatLabel = document.getElementById('auth-float-label');
+  const topbarAccountLabel = document.getElementById('topbar-account-label');
   const profileFirstName = document.getElementById('authProfileFirstName');
   const profileLastName = document.getElementById('authProfileLastName');
   const profilePhone = document.getElementById('authProfilePhone');
@@ -1421,6 +1479,7 @@ function updateAuthUi() {
     if (authUserInfo) authUserInfo.textContent = `${fullName} · ${email}`;
     if (authWelcome) authWelcome.textContent = 'Tu sesión está activa. Puedes comprar, editar tu perfil y revisar historial.';
     if (authFloatLabel) authFloatLabel.textContent = 'Mi cuenta';
+    if (topbarAccountLabel) topbarAccountLabel.textContent = 'Acceder';
     if (profileFirstName) profileFirstName.value = firstName;
     if (profileLastName) profileLastName.value = lastName;
     if (profilePhone) profilePhone.value = normalizePhoneInput(authProfile?.phone || authSession?.user?.user_metadata?.phone || '');
@@ -1436,6 +1495,7 @@ function updateAuthUi() {
         : 'Compra como invitado o ingresa para ver tu historial.';
     }
     if (authFloatLabel) authFloatLabel.textContent = 'Ingresar';
+    if (topbarAccountLabel) topbarAccountLabel.textContent = 'Acceder';
   }
 }
 
@@ -1444,6 +1504,11 @@ function openAuthModal() {
   if (!modal) return;
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
+}
+
+function openAuthModalInMode(mode = 'login') {
+  setAuthMode(mode === 'register' ? 'register' : 'login');
+  openAuthModal();
 }
 
 function closeAuthModal() {
@@ -1455,21 +1520,14 @@ function closeAuthModal() {
 }
 
 function closeMyOrdersModal() {
-  const modal = document.getElementById('myOrdersModal');
-  if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
   setAccountSection('profile');
 }
 
 async function openMyOrdersModal() {
-  const modal = document.getElementById('myOrdersModal');
   const result = document.getElementById('myOrdersResult');
-  if (!modal || !result) return;
+  if (!result) return;
 
   setAccountSection('orders');
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
   result.innerHTML = '<p>Cargando tus pedidos...</p>';
 
   try {
@@ -1584,8 +1642,8 @@ async function handleRegister() {
   const password = String(document.getElementById('authRegisterPassword')?.value || '').trim();
   const name = buildFullName(firstName, lastName);
 
-  if (!firstName || !lastName || !email || !password || phone.length !== 9 || dni.length !== 8) {
-    setAuthFeedback('Completa nombres, apellidos, teléfono (9), DNI (8), correo y contraseña.', 'error');
+  if (!firstName || !lastName || !email || !password || phone.length !== 9) {
+    setAuthFeedback('Completa nombres, apellidos, teléfono (9), correo y contraseña.', 'error');
     return;
   }
 
@@ -1595,7 +1653,7 @@ async function handleRegister() {
       password,
       options: {
         emailRedirectTo: getAuthRedirectUrl(),
-        data: { name, first_name: firstName, last_name: lastName, phone, dni }
+        data: { name, first_name: firstName, last_name: lastName, phone, dni: dni || null }
       }
     }),
     12000,
@@ -1740,12 +1798,24 @@ async function initAuth() {
   const authBtn = document.getElementById('auth-float-btn');
   const authClose = document.getElementById('authCloseBtn');
   const authModal = document.getElementById('authModal');
-  const myOrdersModal = document.getElementById('myOrdersModal');
+  const menuToggleBtn = document.getElementById('menu-toggle-btn');
+
+  menuToggleBtn?.addEventListener('click', () => {
+    const links = Array.from(document.querySelectorAll('.nav a'));
+    if (!links.length) return;
+    categoryCursor = (categoryCursor + 1) % links.length;
+    const link = links[categoryCursor];
+    const targetId = String(link.getAttribute('href') || '').replace('#', '');
+    const target = targetId ? document.getElementById(targetId) : null;
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      links.forEach((l) => l.classList.toggle('active', l === link));
+    }
+  });
 
   authBtn?.addEventListener('click', openAuthModal);
   authClose?.addEventListener('click', closeAuthModal);
   authModal?.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
-  myOrdersModal?.addEventListener('click', (e) => { if (e.target === myOrdersModal) closeMyOrdersModal(); });
 
   document.getElementById('authTabLogin')?.addEventListener('click', () => setAuthMode('login'));
   document.getElementById('authTabRegister')?.addEventListener('click', () => setAuthMode('register'));
@@ -1760,7 +1830,6 @@ async function initAuth() {
     setAccountSection('profile');
   });
   document.getElementById('authProfileSaveBtn')?.addEventListener('click', handleSaveProfile);
-  document.getElementById('myOrdersCloseBtn')?.addEventListener('click', closeMyOrdersModal);
 
   setAuthMode('login');
   setAccountSection('profile');
@@ -1773,16 +1842,29 @@ async function initAuth() {
   const hasHashAccessToken = hash.includes('access_token=');
   const hasQueryAuthCode = urlParams.has('code') || urlParams.has('token_hash');
 
-  if (hasQueryAuthCode) {
+  let recoveryValidationError = null;
+  if (isRecoveryLink) {
     try {
-      await withTimeout(
-        supabaseClient.auth.exchangeCodeForSession(window.location.href),
-        12000,
-        'No se pudo validar el enlace de recuperación.'
-      );
+      if (urlParams.has('code')) {
+        await withTimeout(
+          supabaseClient.auth.exchangeCodeForSession(window.location.href),
+          12000,
+          'No se pudo validar el enlace de recuperación.'
+        );
+      } else if (urlParams.has('token_hash')) {
+        const tokenHash = String(urlParams.get('token_hash') || '').trim();
+        if (tokenHash) {
+          const { error } = await withTimeout(
+            supabaseClient.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash }),
+            12000,
+            'No se pudo validar el enlace de recuperación.'
+          );
+          if (error) throw error;
+        }
+      }
     } catch (error) {
-      console.warn('⚠️ No se pudo intercambiar code/token de recovery:', error?.message || error);
-      setAuthFeedback(friendlyRuntimeError(error, 'No se pudo validar el enlace de recuperación. Solicita otro correo.'), 'error');
+      recoveryValidationError = error;
+      console.warn('⚠️ No se pudo validar enlace de recovery:', error?.message || error);
     }
   }
 
@@ -1796,8 +1878,10 @@ async function initAuth() {
 
     if (authSession?.user) {
       setAuthFeedback('Define tu nueva contraseña para completar la recuperación.', 'info');
-    } else {
+    } else if (recoveryValidationError) {
       setAuthFeedback('No se pudo validar el enlace de recuperación (puede estar vencido o ya usado). Solicita uno nuevo.', 'error');
+    } else {
+      setAuthFeedback('No se detectó una sesión de recuperación válida. Solicita un nuevo correo.', 'error');
     }
   }
 
@@ -1806,6 +1890,26 @@ async function initAuth() {
   }
 
   updateAuthUi();
+
+  const refreshSessionOnWake = async () => {
+    try {
+      await refreshAuthSession();
+    } catch (error) {
+      console.warn('⚠️ No se pudo refrescar sesión al volver de inactividad:', error?.message || error);
+    } finally {
+      recoverInteractiveUiState();
+    }
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshSessionOnWake();
+  });
+
+  window.addEventListener('focus', refreshSessionOnWake);
+  setInterval(() => {
+    if (document.hidden) return;
+    recoverInteractiveUiState();
+  }, 30000);
 
   if ((hasHashAccessToken || hasQueryAuthCode) && authSession?.user && !isRecoveryLink) {
     setAuthMode('login');
@@ -2000,12 +2104,26 @@ async function submitOrder(event) {
 
     console.log('📦 Payload RPC create_order:', getSafeOrderPayloadForLogs(rpcPayload));
 
-    const { data: rpcData, error: rpcError } = await withTimeout(
+    let rpcResult = await withTimeout(
       supabaseClient.rpc('create_order', { payload: rpcPayload }),
       15000,
       'No se pudo crear el pedido por tiempo de espera.'
     );
 
+    if (rpcResult.error && isAuthSessionError(rpcResult.error) && authSession?.user) {
+      const { data: refreshed, error: refreshError } = await supabaseClient.auth.refreshSession();
+      if (refreshError || !refreshed?.session) {
+        throw rpcResult.error;
+      }
+      authSession = refreshed.session;
+      rpcResult = await withTimeout(
+        supabaseClient.rpc('create_order', { payload: rpcPayload }),
+        15000,
+        'No se pudo crear el pedido por tiempo de espera.'
+      );
+    }
+
+    const { data: rpcData, error: rpcError } = rpcResult;
     if (rpcError) throw rpcError;
 
     orderId = rpcData?.order_id || null;
@@ -2113,6 +2231,113 @@ function setupMenuActiveNav(nav, sections = []) {
   if (firstId) activateLink(firstId);
 }
 
+
+function openPlatoModal(item, imageUrl, soldOut = false) {
+  const modal = document.getElementById('platoModal');
+  const name = document.getElementById('platoModalName');
+  const desc = document.getElementById('platoModalDesc');
+  const price = document.getElementById('platoModalPrice');
+  const image = document.getElementById('platoModalImage');
+  const addBtn = document.getElementById('platoModalAddBtn');
+
+  if (!modal || !name || !desc || !price || !image || !addBtn) return;
+
+  name.textContent = item.nombre || 'Plato';
+  desc.textContent = item.descripcion || 'Sin descripción';
+  const promoPrice = getPromoPrice(item);
+  price.innerHTML = promoPrice
+    ? `${formatCurrency(promoPrice)} <span class="plato-price-old">${formatCurrency(item.precio)}</span>`
+    : formatCurrency(item.precio);
+  image.src = imageUrl || 'images/Logos/logo.jpg';
+  image.alt = item.nombre || 'Detalle plato';
+
+  addBtn.disabled = soldOut;
+  addBtn.textContent = soldOut ? 'Agotado' : '+ Agregar';
+  addBtn.onclick = () => {
+    if (soldOut) return;
+    addToCart({
+      id: item.id,
+      nombre: item.nombre,
+      precio: item.precio,
+      imagen: imageUrl
+    });
+    showCartToast(`✅ ${item.nombre} agregado al carrito`);
+    closePlatoModal();
+  };
+
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closePlatoModal() {
+  const modal = document.getElementById('platoModal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function setupMenuSearch() {
+  const input = document.getElementById('menuSearchInput');
+  if (!input) return;
+
+  input.addEventListener('input', () => {
+    cargarMenu();
+  });
+
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    cargarMenu();
+    document.getElementById('menu')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+
+function setupTopbarShortcuts() {
+  const navCartBtn = document.getElementById('nav-cart-btn');
+  const navAccountBtn = document.getElementById('nav-account-btn');
+  const navTrackingBtn = document.getElementById('nav-tracking-btn');
+  const menu = document.getElementById('nav-account-menu');
+  const loginBtn = document.getElementById('nav-login-direct');
+  const registerBtn = document.getElementById('nav-register-direct');
+  const cartStickyBar = document.getElementById('cartStickyBar');
+  const cartStickyCheckout = document.getElementById('cartStickyCheckout');
+
+  navCartBtn?.addEventListener('click', openCartModal);
+  cartStickyBar?.addEventListener('click', openCartModal);
+  cartStickyCheckout?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openCartModal();
+    checkoutStepOpen = false;
+    toggleCheckoutSection(true);
+    renderCartModal();
+  });
+  navTrackingBtn?.addEventListener('click', () => openTrackingModal());
+
+  navAccountBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    menu?.classList.toggle('open');
+    if (menu) menu.setAttribute('aria-hidden', menu.classList.contains('open') ? 'false' : 'true');
+  });
+
+  loginBtn?.addEventListener('click', () => {
+    menu?.classList.remove('open');
+    openAuthModalInMode('login');
+  });
+
+  registerBtn?.addEventListener('click', () => {
+    menu?.classList.remove('open');
+    openAuthModalInMode('register');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!menu || !navAccountBtn) return;
+    if (navAccountBtn.contains(e.target)) return;
+    if (menu.contains(e.target)) return;
+    menu.classList.remove('open');
+    menu.setAttribute('aria-hidden', 'true');
+  });
+}
+
 // ===============================
 // CARGAR MENÚ Y NAVBAR
 // ===============================
@@ -2124,7 +2349,7 @@ async function cargarMenu() {
   try {
     const { data: platosData, error: platosError } = await supabaseClient
       .from('platos')
-      .select('id,nombre,descripcion,precio,imagen,categoria_id,orden,is_available,track_stock,stock')
+      .select('id,nombre,descripcion,precio,imagen,categoria_id,orden,is_available,track_stock,stock,promo_price,precio_promo,precio_oferta,price_promo,is_best_seller,mas_vendido,is_new,nuevo')
       .order('orden', { ascending: true });
 
     if (platosError) throw platosError;
@@ -2136,65 +2361,87 @@ async function cargarMenu() {
 
     if (categoriasError) throw categoriasError;
 
-    platosState = new Map((platosData || []).map((p) => [p.id, p]));
+    menuDataCache = { platos: platosData || [], categorias: categoriasData || [] };
+    platosState = new Map((menuDataCache.platos || []).map((p) => [p.id, p]));
+
+    const searchTerm = String(document.getElementById('menuSearchInput')?.value || '').trim().toLowerCase();
 
     menu.innerHTML = '';
     nav.innerHTML = '';
 
-    categoriasData.forEach(cat => {
-      const items = platosData.filter(p => p.categoria_id === cat.id);
+    menuDataCache.categorias.forEach(cat => {
+      const items = menuDataCache.platos.filter((p) => {
+        if (p.categoria_id !== cat.id) return false;
+        if (!searchTerm) return true;
+        const text = `${p.nombre || ''} ${p.descripcion || ''}`.toLowerCase();
+        return text.includes(searchTerm);
+      });
+      if (!items.length) return;
 
       const navLink = document.createElement('a');
       navLink.href = `#${cat.id}`;
       navLink.textContent = cat.nombre;
       nav.appendChild(navLink);
 
+      const categorySection = document.createElement('section');
+      categorySection.className = 'menu-category';
+
       const h2 = document.createElement('h2');
       h2.className = 'section-title fade-up';
       h2.id = cat.id;
       h2.textContent = cat.nombre;
-      menu.appendChild(h2);
+      categorySection.appendChild(h2);
+
+      const row = document.createElement('div');
+      row.className = 'menu-row';
 
       if (items.length > 0) {
         items.forEach(item => {
-          const div = document.createElement('div');
+          const div = document.createElement('article');
           div.className = 'plato fade-up';
           const soldOut = isPlatoSoldOut(item);
           const stockText = soldOut ? '<span class="sold-out-badge">Agotado</span>' : '';
+          const promoPrice = getPromoPrice(item);
+          const badges = getItemBadges(item).map((b) => `<span class="plato-badge ${b.key}">${b.label}</span>`).join('');
 
           const imageUrl = item.imagen
             ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
             : 'images/Logos/logo.jpg';
 
           div.innerHTML = `
+            <div class="plato-badges">${badges}</div>
             <img src="${imageUrl}" alt="${item.nombre}">
             <h3>${item.nombre}</h3>
             <p>${item.descripcion || ''}</p>
-            <span>${formatCurrency(item.precio)}</span>
+            <span class="plato-price">${promoPrice ? `${formatCurrency(promoPrice)} <span class="plato-price-old">${formatCurrency(item.precio)}</span>` : formatCurrency(item.precio)}</span>
             ${stockText}
-            <button type="button" class="add-cart-btn" ${soldOut ? 'disabled title="Producto agotado"' : ''}>Agregar al carrito</button>
+            <button type="button" class="plato-add-btn" ${soldOut ? 'disabled' : ''}>Agregar</button>
           `;
 
-          div.querySelector('.add-cart-btn')?.addEventListener('click', () => {
+          div.addEventListener('click', (ev) => {
+            if (ev.target.closest('.plato-add-btn')) return;
+            openPlatoModal(item, imageUrl, soldOut);
+          });
+
+          div.querySelector('.plato-add-btn')?.addEventListener('click', (ev) => {
+            ev.stopPropagation();
             if (soldOut) return;
-            addToCart({
-              id: item.id,
-              nombre: item.nombre,
-              precio: item.precio,
-              imagen: imageUrl
-            });
+            addToCart({ id: item.id, nombre: item.nombre, precio: promoPrice || item.precio, imagen: imageUrl });
             showCartToast(`✅ ${item.nombre} agregado al carrito`);
           });
 
-          menu.appendChild(div);
+          row.appendChild(div);
         });
-      } else {
-        const emptyDiv = document.createElement('div');
-        emptyDiv.className = 'plato fade-up';
-        emptyDiv.innerHTML = '<p>No hay platos en esta categoría.</p>';
-        menu.appendChild(emptyDiv);
       }
+
+      categorySection.appendChild(row);
+      menu.appendChild(categorySection);
     });
+
+    if (!menu.querySelector('.section-title')) {
+      menu.innerHTML = '<p>No hay resultados para tu búsqueda. Prueba con otro término.</p>';
+      return;
+    }
 
     const observer = new IntersectionObserver(entries => {
       entries.forEach(e => {
@@ -2229,6 +2476,13 @@ window.addEventListener('load', async () => {
   loadCart();
   setupCartModalEvents();
   setupTrackingEvents();
+  setupTopbarShortcuts();
+  setupMenuSearch();
+
+  const platoModal = document.getElementById('platoModal');
+  document.getElementById('platoModalClose')?.addEventListener('click', closePlatoModal);
+  platoModal?.addEventListener('click', (e) => { if (e.target === platoModal) closePlatoModal(); });
+
   await initAuth();
   updateDireccionRequired();
   updateCartBadge();
@@ -2241,3 +2495,22 @@ window.addEventListener('load', async () => {
   const loader = document.getElementById('loader');
   if (loader) setTimeout(() => loader.classList.add('hide'), 1500);
 });
+
+function getPromoPrice(item = {}) {
+  const options = [item.promo_price, item.precio_promo, item.precio_oferta, item.price_promo];
+  const promo = options.map((v) => Number(v)).find((n) => Number.isFinite(n) && n > 0);
+  const base = Number(item.precio || 0);
+  if (!Number.isFinite(base) || base <= 0 || !promo || promo >= base) return null;
+  return promo;
+}
+
+function getItemBadges(item = {}) {
+  const promo = getPromoPrice(item);
+  const badges = [];
+  if (promo) badges.push({ key: 'promo', label: 'Promoción' });
+  if (item.is_best_seller || item.mas_vendido) badges.push({ key: 'top', label: 'Más vendido' });
+  if (item.is_new || item.nuevo) badges.push({ key: 'new', label: 'Nuevo' });
+  return badges;
+}
+
+
