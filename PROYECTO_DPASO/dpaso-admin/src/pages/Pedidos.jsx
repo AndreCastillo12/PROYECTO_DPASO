@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
+import { logTelemetryEvent } from "../utils/telemetry";
+import { readAdminPreference, saveAdminPreference } from "../utils/adminPreferences";
 
 const ORDER_STATUS = ["pending", "accepted", "preparing", "ready", "dispatched", "delivered", "completed", "cancelled"];
 const PAYMENT_METHODS = ["cash", "yape", "plin", "card", "transfer", "other"];
@@ -91,9 +93,15 @@ export default function Pedidos() {
 
   const [busyOrderId, setBusyOrderId] = useState(null);
 
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const initialPrefs = readAdminPreference("pedidos_filters", {
+    statusFilter: "all",
+    search: "",
+    autoRefresh: false,
+  });
+
+  const [statusFilter, setStatusFilter] = useState(initialPrefs.statusFilter || "all");
+  const [search, setSearch] = useState(initialPrefs.search || "");
+  const [autoRefresh, setAutoRefresh] = useState(Boolean(initialPrefs.autoRefresh));
 
   const { toast, showToast } = useToast(2600);
   const navigate = useNavigate();
@@ -102,7 +110,14 @@ export default function Pedidos() {
   const handleAuthError = useCallback(
     async (error) => {
       if (!isAuthError(error)) return false;
-      showToast("No autorizado. Inicia sesión nuevamente.", "error");
+
+      const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshed?.session && !refreshError) {
+        showToast("Tu sesión se reactivó. Reintenta la acción.", "success");
+        return false;
+      }
+
+      showToast("Tu sesión expiró. Inicia sesión nuevamente.", "error");
       await supabase.auth.signOut();
       navigate("/login", { replace: true });
       return true;
@@ -128,9 +143,12 @@ export default function Pedidos() {
           code: error.code,
         });
 
+        logTelemetryEvent({ level: "error", area: "pedidos", event: "load_orders_failed", message: error.message || "No se pudo cargar pedidos", meta: { code: error.code } });
+
+
         const handled = await handleAuthError(error);
         if (!handled && notifyOnError) {
-          showToast("No se pudo cargar pedidos", "error");
+          showToast("No se pudo cargar pedidos. Intenta nuevamente.", "error");
         }
 
         setOrdersError("No se pudo cargar pedidos.");
@@ -171,9 +189,11 @@ export default function Pedidos() {
           orderId,
         });
 
+        logTelemetryEvent({ level: "error", area: "pedidos", event: "load_order_items_failed", message: error.message || "No se pudo cargar items", meta: { code: error.code, orderId } });
+
         const handled = await handleAuthError(error);
         if (!handled && notifyOnError) {
-          showToast("No se pudo cargar el detalle del pedido", "error");
+          showToast("No se pudo cargar el detalle del pedido. Intenta nuevamente.", "error");
         }
 
         setDetailError("No se pudo cargar los items del pedido.");
@@ -217,6 +237,10 @@ export default function Pedidos() {
   }, [autoRefresh, loadOrderItems, loadOrders, selectedOrder?.id]);
 
 
+
+  useEffect(() => {
+    saveAdminPreference("pedidos_filters", { statusFilter, search, autoRefresh });
+  }, [autoRefresh, search, statusFilter]);
 
   useEffect(() => {
     const orderIdFromQuery = searchParams.get("order_id");
@@ -458,7 +482,7 @@ export default function Pedidos() {
       <Toast toast={toast} />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-        <h2 style={{ margin: 0 }}>Pedidos</h2>
+        <h2 style={{ margin: 0 }}>Pedidos {loading && orders.length > 0 ? "· Actualizando..." : ""}</h2>
         <button
           type="button"
           onClick={() => loadOrders({ notifyOnError: true })}

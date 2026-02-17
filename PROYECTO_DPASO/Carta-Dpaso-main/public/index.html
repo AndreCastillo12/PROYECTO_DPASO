@@ -22,22 +22,6 @@
   <img src="images/Logos/whatsapp.png" alt="WhatsApp">
 </a>
 
-<!-- CARRITO FLOAT -->
-<button id="cart-float-btn" class="cart-float" type="button" aria-label="Abrir carrito">
-  <span class="cart-icon">🛒</span>
-  <span id="cart-badge" class="cart-badge">0</span>
-</button>
-
-<button id="tracking-float-btn" class="tracking-float" type="button" aria-label="Rastrear pedido">
-  <span class="tracking-float-icon">🛵</span>
-  <span>Rastrear pedido</span>
-</button>
-
-<button id="auth-float-btn" class="auth-float" type="button" aria-label="Cuenta">
-  <span id="auth-float-icon">👤</span>
-  <span id="auth-float-label">Ingresar</span>
-</button>
-
 <!-- MODAL CARRITO/CHECKOUT -->
 <div id="cart-modal" class="cart-modal" aria-hidden="true">
   <div class="cart-modal-content">
@@ -146,39 +130,99 @@
 
 <div id="cart-toast" class="cart-toast" aria-live="polite"></div>
 
-<header class="header">
-  <img src="images/Logos/logo.jpg" class="logo" alt="Logo DPASO">
-  <div class="header-text">
-    <h1>CARTA DPASO</h1>
-    <p>Cocina Libre · Pescados & Mariscos</p>
+<header class="dpaso-shell">
+  <div class="dpaso-topbar">
+    <button id="menu-toggle-btn" class="menu-toggle-btn" type="button" aria-label="Ir a categorías">☰</button>
+    <img src="images/Logos/logo.jpg" class="logo" alt="Logo DPASO">
+    <div class="brand-copy">
+      <strong>DPASO</strong>
+      <small>Cocina Libre</small>
+    </div>
+    <div class="dpaso-search-wrap">
+      <span>🔎</span>
+      <input id="menuSearchInput" type="text" placeholder="Buscar en carta...">
+    </div>
+    <div class="dpaso-actions">
+      <button id="nav-tracking-btn" class="nav-action-btn" type="button">
+        <span>🛵</span>
+        <span>Rastrear</span>
+      </button>
+      <div class="account-menu-wrap">
+        <button id="nav-account-btn" class="nav-action-btn" type="button">
+          <span>👤</span>
+          <span id="topbar-account-label">Mi cuenta</span>
+          <span>▾</span>
+        </button>
+        <div id="nav-account-menu" class="nav-account-menu" aria-hidden="true">
+          <button id="nav-login-direct" type="button">Iniciar sesión</button>
+          <button id="nav-register-direct" type="button">Registrarse</button>
+        </div>
+      </div>
+      <button id="nav-cart-btn" class="nav-action-btn nav-cart-btn" type="button">
+        <span>🛒</span>
+        <span>Carrito</span>
+        <span id="nav-cart-badge" class="nav-cart-badge">0</span>
+      </button>
+    </div>
   </div>
+
+  <section class="hero-banner">
+    <div class="hero-overlay">
+      <p class="hero-eyebrow">Carta online</p>
+      <h1>Sabores marinos y criollos con estilo DPASO</h1>
+      <p class="hero-sub">Elige por categoría, agrega al carrito y confirma tu pedido en minutos.</p>
+    </div>
+  </section>
+
+  <nav class="nav"></nav>
 </header>
 
-<nav class="nav">
-  <a href="#picar">Pa’ Picar</a>
-  <a href="#comer">Pa’ Comer</a>
-  <a href="#combos">Combos</a>
-  <a href="#calientes">Calientes</a>
-  <a href="#bebidas">Bebidas</a>
-</nav>
-
-<section class="menu" id="menu"></section>
+<main class="menu-wrapper">
+  <section class="menu" id="menu"></section>
+</main>
 
 <footer>
-  <p>📍 Mz WI Lt. 37, Calle 46 San Antonio de Carapongo</p>
-  <p><a href="#" id="btnTracking" class="tracking-link">Rastrear pedido</a></p>
-  <div class="socials">
-    <a href="https://www.facebook.com/profile.php?id=61575799342894" target="_blank" rel="noopener noreferrer">
-      <img src="images/Logos/facebook.png" alt="Facebook">
-    </a>
-    <a href="https://www.instagram.com/dpaso_cocina_libre/" target="_blank" rel="noopener noreferrer">
-      <img src="images/Logos/instagram.png" alt="Instagram">
-    </a>
-    <a href="https://www.tiktok.com/@dpaso.barra.marin" target="_blank" rel="noopener noreferrer">
-      <img src="images/Logos/tiktok.png" alt="TikTok">
-    </a>
+  <div class="footer-grid">
+    <div>
+      <h4>Contacto</h4>
+      <p>📍 Mz WI Lt. 37, Calle 46 San Antonio de Carapongo</p>
+      <p>📞 +51 941 552 878</p>
+    </div>
+    <div>
+      <h4>Atención</h4>
+      <p>Delivery y recojo en local</p>
+      <p>Pedidos rápidos por la web</p>
+    </div>
+    <div>
+      <h4>Redes</h4>
+      <div class="socials">
+        <a href="https://www.facebook.com/profile.php?id=61575799342894" target="_blank" rel="noopener noreferrer">
+          <img src="images/Logos/facebook.png" alt="Facebook">
+        </a>
+        <a href="https://www.instagram.com/dpaso_cocina_libre/" target="_blank" rel="noopener noreferrer">
+          <img src="images/Logos/instagram.png" alt="Instagram">
+        </a>
+        <a href="https://www.tiktok.com/@dpaso.barra.marin" target="_blank" rel="noopener noreferrer">
+          <img src="images/Logos/tiktok.png" alt="TikTok">
+        </a>
+      </div>
+    </div>
   </div>
 </footer>
+
+
+<div id="platoModal" class="tracking-modal" aria-hidden="true">
+  <div class="tracking-modal-card plato-modal-card">
+    <button id="platoModalClose" class="cart-close" type="button" aria-label="Cerrar detalle">×</button>
+    <img id="platoModalImage" src="images/Logos/logo.jpg" alt="Detalle plato" class="plato-modal-image" />
+    <h3 id="platoModalName">Plato</h3>
+    <p id="platoModalDesc" class="tracking-muted"></p>
+    <div class="plato-modal-footer">
+      <strong id="platoModalPrice">S/ 0.00</strong>
+      <button id="platoModalAddBtn" class="plato-modal-add" type="button">+ Agregar</button>
+    </div>
+  </div>
+</div>
 
 <div id="trackingModal" class="tracking-modal" aria-hidden="true">
   <div class="tracking-modal-card">
@@ -201,84 +245,90 @@
 </div>
 
 
-<div id="authModal" class="tracking-modal" aria-hidden="true">
-  <div class="tracking-modal-card auth-card">
-    <h3>Mi cuenta</h3>
-    <p id="authWelcome" class="tracking-muted">Compra como invitado o ingresa para ver tu historial.</p>
+<div id="authModal" class="auth-screen" aria-hidden="true">
+  <div class="auth-screen-layout">
+    <aside class="auth-side-art">
+      <div class="auth-art-overlay">
+        <p class="auth-art-eyebrow">DPASO · Cocina Libre</p>
+        <h2>Bienvenido</h2>
+        <p>Accede para ver tus pedidos, actualizar tu perfil y comprar más rápido.</p>
+      </div>
+    </aside>
 
-    <div id="authLoggedOutView">
-      <div class="auth-tabs">
-        <button id="authTabLogin" class="auth-tab active" type="button">Iniciar sesión</button>
-        <button id="authTabRegister" class="auth-tab" type="button">Crear cuenta</button>
+    <section class="auth-side-form">
+      <button id="authCloseBtn" class="auth-close-icon" type="button" aria-label="Cerrar">✕</button>
+      <h3>Mi cuenta</h3>
+      <p id="authWelcome" class="tracking-muted">Compra como invitado o ingresa para ver tu historial.</p>
+
+      <div id="authLoggedOutView">
+        <div class="auth-tabs">
+          <button id="authTabLogin" class="auth-tab active" type="button">Iniciar sesión</button>
+          <button id="authTabRegister" class="auth-tab" type="button">Crear cuenta</button>
+        </div>
+
+        <div id="authLoginView">
+          <label class="auth-field-label" for="authLoginEmail">Correo</label>
+          <input id="authLoginEmail" type="email" placeholder="Correo" autocomplete="email" />
+          <label class="auth-field-label" for="authLoginPassword">Contraseña</label>
+          <input id="authLoginPassword" type="password" placeholder="Contraseña" autocomplete="current-password" />
+          <button id="authLoginBtn" class="tracking-btn tracking-primary tracking-full" type="button">Ingresar</button>
+          <button id="authResetLink" class="auth-link-btn" type="button">¿Olvidaste tu contraseña?</button>
+          <button id="authGoogleBtn" class="tracking-btn tracking-ghost tracking-full" type="button">Ingresar con Google</button>
+        </div>
+
+        <div id="authResetView" style="display:none;">
+          <p class="auth-note" style="margin-bottom:10px;">Ingresa tu nueva contraseña para completar la recuperación.</p>
+          <input id="authResetPassword" type="password" placeholder="Nueva contraseña" autocomplete="new-password" />
+          <input id="authResetPasswordConfirm" type="password" placeholder="Confirmar nueva contraseña" autocomplete="new-password" />
+          <button id="authResetSaveBtn" class="tracking-btn tracking-primary tracking-full" type="button">Guardar nueva contraseña</button>
+        </div>
+
+        <div id="authRegisterView" style="display:none;">
+          <label class="auth-field-label" for="authRegisterFirstName">Nombres</label>
+          <input id="authRegisterFirstName" type="text" placeholder="Nombres" autocomplete="given-name" />
+          <label class="auth-field-label" for="authRegisterLastName">Apellidos</label>
+          <input id="authRegisterLastName" type="text" placeholder="Apellidos" autocomplete="family-name" />
+          <label class="auth-field-label" for="authRegisterPhone">Teléfono</label>
+          <input id="authRegisterPhone" type="tel" placeholder="Teléfono (9 dígitos)" autocomplete="tel" />
+          <label class="auth-field-label" for="authRegisterDni">DNI</label>
+          <input id="authRegisterDni" type="text" placeholder="DNI (8 dígitos)" autocomplete="off" />
+          <label class="auth-field-label" for="authRegisterEmail">Correo</label>
+          <input id="authRegisterEmail" type="email" placeholder="Correo" autocomplete="email" />
+          <label class="auth-field-label" for="authRegisterPassword">Contraseña</label>
+          <input id="authRegisterPassword" type="password" placeholder="Contraseña" autocomplete="new-password" />
+          <button id="authRegisterBtn" class="tracking-btn tracking-primary tracking-full" type="button">Crear cuenta</button>
+          <p class="auth-note">Si no te llega el correo, revisa spam/promociones. Puedes seguir comprando como invitado.</p>
+        </div>
       </div>
 
-      <div id="authLoginView">
-        <label class="auth-field-label" for="authLoginEmail">Correo</label>
-        <input id="authLoginEmail" type="email" placeholder="Correo" autocomplete="email" />
-        <label class="auth-field-label" for="authLoginPassword">Contraseña</label>
-        <input id="authLoginPassword" type="password" placeholder="Contraseña" autocomplete="current-password" />
-        <button id="authLoginBtn" class="tracking-btn tracking-primary tracking-full" type="button">Ingresar</button>
-        <button id="authResetLink" class="auth-link-btn" type="button">¿Olvidaste tu contraseña?</button>
-        <button id="authGoogleBtn" class="tracking-btn tracking-ghost tracking-full" type="button">Ingresar con Google</button>
+      <div id="authLoggedInView" style="display:none;">
+        <p id="authUserInfo" class="tracking-muted"></p>
+        <div class="tracking-row">
+          <button id="authMyOrdersBtn" class="tracking-btn tracking-ghost auth-account-tab" type="button">Mis pedidos</button>
+          <button id="authEditProfileBtn" class="tracking-btn tracking-primary auth-account-tab active" type="button">Editar perfil</button>
+        </div>
+        <div id="authProfileView" style="display:none; margin-top:10px;">
+          <label class="auth-field-label" for="authProfileFirstName">Nombres</label>
+          <input id="authProfileFirstName" type="text" placeholder="Nombres" autocomplete="given-name" />
+          <label class="auth-field-label" for="authProfileLastName">Apellidos</label>
+          <input id="authProfileLastName" type="text" placeholder="Apellidos" autocomplete="family-name" />
+          <label class="auth-field-label" for="authProfilePhone">Teléfono</label>
+          <input id="authProfilePhone" type="tel" placeholder="Teléfono (9 dígitos)" autocomplete="tel" />
+          <label class="auth-field-label" for="authProfileDni">DNI</label>
+          <input id="authProfileDni" type="text" placeholder="DNI (8 dígitos)" autocomplete="off" />
+          <label class="auth-field-label" for="authProfileEmail">Correo</label>
+          <input id="authProfileEmail" type="email" placeholder="Correo" autocomplete="email" readonly />
+          <button id="authProfileSaveBtn" class="tracking-btn tracking-primary tracking-full" type="button">Guardar perfil</button>
+        </div>
+        <div id="authOrdersView" style="display:none; margin-top:10px;">
+          <h3 style="margin:0 0 10px;">Mis pedidos</h3>
+          <div id="myOrdersResult" class="tracking-result"></div>
+        </div>
+        <button id="authLogoutBtn" class="tracking-btn tracking-ghost tracking-full" type="button" style="margin-top:10px;">Cerrar sesión</button>
       </div>
 
-      <div id="authResetView" style="display:none;">
-        <p class="auth-note" style="margin-bottom:10px;">Ingresa tu nueva contraseña para completar la recuperación.</p>
-        <input id="authResetPassword" type="password" placeholder="Nueva contraseña" autocomplete="new-password" />
-        <input id="authResetPasswordConfirm" type="password" placeholder="Confirmar nueva contraseña" autocomplete="new-password" />
-        <button id="authResetSaveBtn" class="tracking-btn tracking-primary tracking-full" type="button">Guardar nueva contraseña</button>
-      </div>
-
-      <div id="authRegisterView" style="display:none;">
-        <label class="auth-field-label" for="authRegisterFirstName">Nombres</label>
-        <input id="authRegisterFirstName" type="text" placeholder="Nombres" autocomplete="given-name" />
-        <label class="auth-field-label" for="authRegisterLastName">Apellidos</label>
-        <input id="authRegisterLastName" type="text" placeholder="Apellidos" autocomplete="family-name" />
-        <label class="auth-field-label" for="authRegisterPhone">Teléfono</label>
-        <input id="authRegisterPhone" type="tel" placeholder="Teléfono (9 dígitos)" autocomplete="tel" />
-        <label class="auth-field-label" for="authRegisterDni">DNI</label>
-        <input id="authRegisterDni" type="text" placeholder="DNI (8 dígitos)" autocomplete="off" />
-        <label class="auth-field-label" for="authRegisterEmail">Correo</label>
-        <input id="authRegisterEmail" type="email" placeholder="Correo" autocomplete="email" />
-        <label class="auth-field-label" for="authRegisterPassword">Contraseña</label>
-        <input id="authRegisterPassword" type="password" placeholder="Contraseña" autocomplete="new-password" />
-        <button id="authRegisterBtn" class="tracking-btn tracking-primary tracking-full" type="button">Crear cuenta</button>
-        <p class="auth-note">Si no te llega el correo, revisa spam/promociones. Puedes seguir comprando como invitado.</p>
-      </div>
-    </div>
-
-    <div id="authLoggedInView" style="display:none;">
-      <p id="authUserInfo" class="tracking-muted"></p>
-      <div class="tracking-row">
-        <button id="authMyOrdersBtn" class="tracking-btn tracking-ghost auth-account-tab" type="button">Mis pedidos</button>
-        <button id="authEditProfileBtn" class="tracking-btn tracking-primary auth-account-tab active" type="button">Editar perfil</button>
-      </div>
-      <div id="authProfileView" style="display:none; margin-top:10px;">
-        <label class="auth-field-label" for="authProfileFirstName">Nombres</label>
-        <input id="authProfileFirstName" type="text" placeholder="Nombres" autocomplete="given-name" />
-        <label class="auth-field-label" for="authProfileLastName">Apellidos</label>
-        <input id="authProfileLastName" type="text" placeholder="Apellidos" autocomplete="family-name" />
-        <label class="auth-field-label" for="authProfilePhone">Teléfono</label>
-        <input id="authProfilePhone" type="tel" placeholder="Teléfono (9 dígitos)" autocomplete="tel" />
-        <label class="auth-field-label" for="authProfileDni">DNI</label>
-        <input id="authProfileDni" type="text" placeholder="DNI (8 dígitos)" autocomplete="off" />
-        <label class="auth-field-label" for="authProfileEmail">Correo</label>
-        <input id="authProfileEmail" type="email" placeholder="Correo" autocomplete="email" readonly />
-        <button id="authProfileSaveBtn" class="tracking-btn tracking-primary tracking-full" type="button">Guardar perfil</button>
-      </div>
-      <button id="authLogoutBtn" class="tracking-btn tracking-ghost tracking-full" type="button" style="margin-top:10px;">Cerrar sesión</button>
-    </div>
-
-    <p id="authFeedback" class="checkout-feedback"></p>
-    <button id="authCloseBtn" class="tracking-btn tracking-danger tracking-full" type="button">Cerrar</button>
-  </div>
-</div>
-
-<div id="myOrdersModal" class="tracking-modal" aria-hidden="true">
-  <div class="tracking-modal-card">
-    <h3>Mis pedidos</h3>
-    <div id="myOrdersResult" class="tracking-result"></div>
-    <button id="myOrdersCloseBtn" class="tracking-btn tracking-danger tracking-full" type="button">Cerrar</button>
+      <p id="authFeedback" class="checkout-feedback"></p>
+    </section>
   </div>
 </div>
 
