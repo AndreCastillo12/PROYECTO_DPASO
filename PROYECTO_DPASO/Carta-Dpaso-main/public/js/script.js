@@ -77,6 +77,19 @@ async function refreshAuthSession() {
   return authSession;
 }
 
+function isAuthSessionError(error) {
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('jwt')
+    || message.includes('expired')
+    || message.includes('token')
+    || code === 'PGRST301'
+    || code === 'PGRST302'
+    || code === '42501'
+  );
+}
+
 function friendlyRuntimeError(error, fallback = 'No se pudo completar la acción.') {
   const msg = String(error?.message || '').trim();
   if (!msg) return fallback;
@@ -1382,8 +1395,12 @@ function setAccountSection(section = 'profile') {
   editProfileBtn?.classList.toggle('active', safeSection === 'profile');
 
   const profileView = document.getElementById('authProfileView');
+  const ordersView = document.getElementById('authOrdersView');
   if (profileView) {
     profileView.style.display = safeSection === 'profile' ? 'block' : 'none';
+  }
+  if (ordersView) {
+    ordersView.style.display = safeSection === 'orders' ? 'block' : 'none';
   }
 }
 
@@ -1455,21 +1472,14 @@ function closeAuthModal() {
 }
 
 function closeMyOrdersModal() {
-  const modal = document.getElementById('myOrdersModal');
-  if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
   setAccountSection('profile');
 }
 
 async function openMyOrdersModal() {
-  const modal = document.getElementById('myOrdersModal');
   const result = document.getElementById('myOrdersResult');
-  if (!modal || !result) return;
+  if (!result) return;
 
   setAccountSection('orders');
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
   result.innerHTML = '<p>Cargando tus pedidos...</p>';
 
   try {
@@ -1740,12 +1750,10 @@ async function initAuth() {
   const authBtn = document.getElementById('auth-float-btn');
   const authClose = document.getElementById('authCloseBtn');
   const authModal = document.getElementById('authModal');
-  const myOrdersModal = document.getElementById('myOrdersModal');
 
   authBtn?.addEventListener('click', openAuthModal);
   authClose?.addEventListener('click', closeAuthModal);
   authModal?.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
-  myOrdersModal?.addEventListener('click', (e) => { if (e.target === myOrdersModal) closeMyOrdersModal(); });
 
   document.getElementById('authTabLogin')?.addEventListener('click', () => setAuthMode('login'));
   document.getElementById('authTabRegister')?.addEventListener('click', () => setAuthMode('register'));
@@ -1760,7 +1768,6 @@ async function initAuth() {
     setAccountSection('profile');
   });
   document.getElementById('authProfileSaveBtn')?.addEventListener('click', handleSaveProfile);
-  document.getElementById('myOrdersCloseBtn')?.addEventListener('click', closeMyOrdersModal);
 
   setAuthMode('login');
   setAccountSection('profile');
@@ -1773,16 +1780,29 @@ async function initAuth() {
   const hasHashAccessToken = hash.includes('access_token=');
   const hasQueryAuthCode = urlParams.has('code') || urlParams.has('token_hash');
 
-  if (hasQueryAuthCode) {
+  let recoveryValidationError = null;
+  if (isRecoveryLink) {
     try {
-      await withTimeout(
-        supabaseClient.auth.exchangeCodeForSession(window.location.href),
-        12000,
-        'No se pudo validar el enlace de recuperación.'
-      );
+      if (urlParams.has('code')) {
+        await withTimeout(
+          supabaseClient.auth.exchangeCodeForSession(window.location.href),
+          12000,
+          'No se pudo validar el enlace de recuperación.'
+        );
+      } else if (urlParams.has('token_hash')) {
+        const tokenHash = String(urlParams.get('token_hash') || '').trim();
+        if (tokenHash) {
+          const { error } = await withTimeout(
+            supabaseClient.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash }),
+            12000,
+            'No se pudo validar el enlace de recuperación.'
+          );
+          if (error) throw error;
+        }
+      }
     } catch (error) {
-      console.warn('⚠️ No se pudo intercambiar code/token de recovery:', error?.message || error);
-      setAuthFeedback(friendlyRuntimeError(error, 'No se pudo validar el enlace de recuperación. Solicita otro correo.'), 'error');
+      recoveryValidationError = error;
+      console.warn('⚠️ No se pudo validar enlace de recovery:', error?.message || error);
     }
   }
 
@@ -1796,8 +1816,10 @@ async function initAuth() {
 
     if (authSession?.user) {
       setAuthFeedback('Define tu nueva contraseña para completar la recuperación.', 'info');
-    } else {
+    } else if (recoveryValidationError) {
       setAuthFeedback('No se pudo validar el enlace de recuperación (puede estar vencido o ya usado). Solicita uno nuevo.', 'error');
+    } else {
+      setAuthFeedback('No se detectó una sesión de recuperación válida. Solicita un nuevo correo.', 'error');
     }
   }
 
@@ -1806,6 +1828,20 @@ async function initAuth() {
   }
 
   updateAuthUi();
+
+  const refreshSessionOnWake = async () => {
+    try {
+      await refreshAuthSession();
+    } catch (error) {
+      console.warn('⚠️ No se pudo refrescar sesión al volver de inactividad:', error?.message || error);
+    }
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshSessionOnWake();
+  });
+
+  window.addEventListener('focus', refreshSessionOnWake);
 
   if ((hasHashAccessToken || hasQueryAuthCode) && authSession?.user && !isRecoveryLink) {
     setAuthMode('login');
@@ -2000,12 +2036,26 @@ async function submitOrder(event) {
 
     console.log('📦 Payload RPC create_order:', getSafeOrderPayloadForLogs(rpcPayload));
 
-    const { data: rpcData, error: rpcError } = await withTimeout(
+    let rpcResult = await withTimeout(
       supabaseClient.rpc('create_order', { payload: rpcPayload }),
       15000,
       'No se pudo crear el pedido por tiempo de espera.'
     );
 
+    if (rpcResult.error && isAuthSessionError(rpcResult.error) && authSession?.user) {
+      const { data: refreshed, error: refreshError } = await supabaseClient.auth.refreshSession();
+      if (refreshError || !refreshed?.session) {
+        throw rpcResult.error;
+      }
+      authSession = refreshed.session;
+      rpcResult = await withTimeout(
+        supabaseClient.rpc('create_order', { payload: rpcPayload }),
+        15000,
+        'No se pudo crear el pedido por tiempo de espera.'
+      );
+    }
+
+    const { data: rpcData, error: rpcError } = rpcResult;
     if (rpcError) throw rpcError;
 
     orderId = rpcData?.order_id || null;

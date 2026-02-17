@@ -266,6 +266,10 @@
         <input id="authProfileEmail" type="email" placeholder="Correo" autocomplete="email" readonly />
         <button id="authProfileSaveBtn" class="tracking-btn tracking-primary tracking-full" type="button">Guardar perfil</button>
       </div>
+      <div id="authOrdersView" style="display:none; margin-top:10px;">
+        <h3 style="margin:0 0 10px;">Mis pedidos</h3>
+        <div id="myOrdersResult" class="tracking-result"></div>
+      </div>
       <button id="authLogoutBtn" class="tracking-btn tracking-ghost tracking-full" type="button" style="margin-top:10px;">Cerrar sesión</button>
     </div>
 
@@ -274,13 +278,6 @@
   </div>
 </div>
 
-<div id="myOrdersModal" class="tracking-modal" aria-hidden="true">
-  <div class="tracking-modal-card">
-    <h3>Mis pedidos</h3>
-    <div id="myOrdersResult" class="tracking-result"></div>
-    <button id="myOrdersCloseBtn" class="tracking-btn tracking-danger tracking-full" type="button">Cerrar</button>
-  </div>
-</div>
 
 <!-- SUPABASE SDK -->
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
