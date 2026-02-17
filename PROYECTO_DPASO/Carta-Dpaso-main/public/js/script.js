@@ -2227,6 +2227,58 @@ function setupMenuActiveNav(nav, sections = []) {
 }
 
 
+
+function setupMenuRowDragScroll(rows = []) {
+  rows.forEach((row) => {
+    if (!row) return;
+
+    let isPointerDown = false;
+    let startX = 0;
+    let startScrollLeft = 0;
+
+    row.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      isPointerDown = true;
+      row.dataset.dragging = 'false';
+      startX = event.clientX;
+      startScrollLeft = row.scrollLeft;
+      row.classList.add('dragging');
+      row.setPointerCapture?.(event.pointerId);
+    });
+
+    row.addEventListener('pointermove', (event) => {
+      if (!isPointerDown) return;
+      const delta = event.clientX - startX;
+      if (Math.abs(delta) > 4) row.dataset.dragging = 'true';
+      row.scrollLeft = startScrollLeft - delta;
+    });
+
+    const releaseDrag = () => {
+      if (!isPointerDown) return;
+      isPointerDown = false;
+      row.classList.remove('dragging');
+      window.setTimeout(() => { delete row.dataset.dragging; }, 100);
+    };
+
+    row.addEventListener('pointerup', releaseDrag);
+    row.addEventListener('pointercancel', releaseDrag);
+    row.addEventListener('pointerleave', releaseDrag);
+
+    row.addEventListener('click', (event) => {
+      if (row.dataset.dragging === 'true') {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, true);
+
+    row.addEventListener('wheel', (event) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      row.scrollLeft += event.deltaY;
+      event.preventDefault();
+    }, { passive: false });
+  });
+}
+
 function openPlatoModal(item, imageUrl, soldOut = false) {
   const modal = document.getElementById('platoModal');
   const name = document.getElementById('platoModalName');
@@ -2271,6 +2323,8 @@ function closePlatoModal() {
 function setupMenuSearch() {
   const input = document.getElementById('menuSearchInput');
   if (!input) return;
+
+  input.value = '';
 
   input.addEventListener('input', () => {
     cargarMenu();
@@ -2424,6 +2478,9 @@ async function cargarMenu() {
 
     const sectionTitles = Array.from(menu.querySelectorAll('.section-title'));
     setupMenuActiveNav(nav, sectionTitles);
+
+    const menuRows = Array.from(menu.querySelectorAll('.menu-row'));
+    setupMenuRowDragScroll(menuRows);
 
     document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
   } catch (err) {
