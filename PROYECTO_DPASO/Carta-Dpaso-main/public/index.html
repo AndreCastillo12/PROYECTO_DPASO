@@ -28,11 +28,6 @@
   <span id="cart-badge" class="cart-badge">0</span>
 </button>
 
-<button id="tracking-float-btn" class="tracking-float" type="button" aria-label="Rastrear pedido">
-  <span class="tracking-float-icon">🛵</span>
-  <span>Rastrear pedido</span>
-</button>
-
 <button id="auth-float-btn" class="auth-float" type="button" aria-label="Cuenta">
   <span id="auth-float-icon">👤</span>
   <span id="auth-float-label">Ingresar</span>
@@ -146,27 +141,32 @@
 
 <div id="cart-toast" class="cart-toast" aria-live="polite"></div>
 
-<header class="header">
-  <img src="images/Logos/logo.jpg" class="logo" alt="Logo DPASO">
-  <div class="header-text">
-    <h1>CARTA DPASO</h1>
-    <p>Cocina Libre · Pescados & Mariscos</p>
+<header class="kfc-nav-shell">
+  <div class="kfc-topbar">
+    <button id="menu-toggle-btn" class="menu-toggle-btn" type="button" aria-label="Abrir menú">☰</button>
+    <img src="images/Logos/logo.jpg" class="logo" alt="Logo DPASO">
+    <div class="kfc-search-wrap">
+      <span>🔎</span>
+      <input type="text" placeholder="Buscar en carta..." disabled>
+    </div>
+    <div class="kfc-actions">
+      <span>Ingresa tu ubicación</span>
+      <span id="kfc-hello-account">Hola, identifícate</span>
+    </div>
   </div>
+  <nav class="nav">
+    <a href="#picar">Pa’ Picar</a>
+    <a href="#comer">Pa’ Comer</a>
+    <a href="#combos">Combos</a>
+    <a href="#calientes">Calientes</a>
+    <a href="#bebidas">Bebidas</a>
+  </nav>
 </header>
-
-<nav class="nav">
-  <a href="#picar">Pa’ Picar</a>
-  <a href="#comer">Pa’ Comer</a>
-  <a href="#combos">Combos</a>
-  <a href="#calientes">Calientes</a>
-  <a href="#bebidas">Bebidas</a>
-</nav>
 
 <section class="menu" id="menu"></section>
 
 <footer>
   <p>📍 Mz WI Lt. 37, Calle 46 San Antonio de Carapongo</p>
-  <p><a href="#" id="btnTracking" class="tracking-link">Rastrear pedido</a></p>
   <div class="socials">
     <a href="https://www.facebook.com/profile.php?id=61575799342894" target="_blank" rel="noopener noreferrer">
       <img src="images/Logos/facebook.png" alt="Facebook">
@@ -266,6 +266,10 @@
         <input id="authProfileEmail" type="email" placeholder="Correo" autocomplete="email" readonly />
         <button id="authProfileSaveBtn" class="tracking-btn tracking-primary tracking-full" type="button">Guardar perfil</button>
       </div>
+      <div id="authOrdersView" style="display:none; margin-top:10px;">
+        <h3 style="margin:0 0 10px;">Mis pedidos</h3>
+        <div id="myOrdersResult" class="tracking-result"></div>
+      </div>
       <button id="authLogoutBtn" class="tracking-btn tracking-ghost tracking-full" type="button" style="margin-top:10px;">Cerrar sesión</button>
     </div>
 
@@ -274,13 +278,6 @@
   </div>
 </div>
 
-<div id="myOrdersModal" class="tracking-modal" aria-hidden="true">
-  <div class="tracking-modal-card">
-    <h3>Mis pedidos</h3>
-    <div id="myOrdersResult" class="tracking-result"></div>
-    <button id="myOrdersCloseBtn" class="tracking-btn tracking-danger tracking-full" type="button">Cerrar</button>
-  </div>
-</div>
 
 <!-- SUPABASE SDK -->
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>

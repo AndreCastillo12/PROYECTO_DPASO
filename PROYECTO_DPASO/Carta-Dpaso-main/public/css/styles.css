@@ -59,56 +59,109 @@ body {
 }
 
 /* ===============================
-   HEADER
+   HEADER + NAV (KFC-LIKE)
 ================================ */
-.header {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  padding: 20px;
-  background: #0b2d4d;
-  color: #fff;
-}
-
-.header-text h1 {
-  font-size: 1.6rem;
-  letter-spacing: 1px;
-}
-
-.header-text p {
-  font-size: 0.9rem;
-  opacity: 0.9;
-}
-
-/* ===============================
-   NAV
-================================ */
-.nav {
+.kfc-nav-shell {
   position: sticky;
   top: 0;
-  z-index: 100;
-  background: #1f4e79;
+  z-index: 300;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+}
+
+.kfc-topbar {
+  background: #e4002b;
+  color: #fff;
   display: flex;
-  justify-content: space-around;
-  padding: 12px 5px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.menu-toggle-btn {
+  border: none;
+  background: transparent;
+  color: #fff;
+  font-size: 1.7rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.logo {
+  width: 58px;
+  height: 58px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 2px solid rgba(255,255,255,0.55);
+}
+
+.kfc-search-wrap {
+  flex: 1;
+  min-width: 180px;
+  background: #fff;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  color: #6b7280;
+}
+
+.kfc-search-wrap input {
+  border: none;
+  outline: none;
+  width: 100%;
+  background: transparent;
+  font-size: 0.95rem;
+}
+
+.kfc-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  white-space: nowrap;
+}
+
+.nav {
+  background: #fff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .nav a {
   text-decoration: none;
-  font-size: 0.85rem;
-  font-weight: bold;
-  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #0b2d4d;
+  padding: 6px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .nav a:hover {
-  text-decoration: underline;
+  background: #ffe2e8;
+  color: #b00022;
 }
 
 .nav a.active {
-  background: rgba(255,255,255,0.18);
-  padding: 6px 10px;
-  border-radius: 999px;
-  text-decoration: none;
+  background: #ffe2e8;
+  color: #b00022;
+}
+
+@media (max-width: 860px) {
+  .kfc-actions {
+    display: none;
+  }
+
+  .logo {
+    width: 50px;
+    height: 50px;
+  }
 }
 
 /* ===============================
@@ -223,14 +276,23 @@ body {
 footer {
   background: #0b2d4d;
   color: #fff;
-  padding: 20px;
+  padding: 24px 20px 34px;
   text-align: center;
+}
+
+.socials {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
 }
 
 .socials img {
   width: 26px;
   filter: invert(1);
-  margin: 15px 8px;
+  margin: 0;
 }
 
 /* ===============================
@@ -307,8 +369,8 @@ footer {
 ================================ */
 .whatsapp-float {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
+  bottom: 18px;
+  right: 18px;
   width: 55px;
   height: 55px;
   background: #178d42;
@@ -334,8 +396,8 @@ footer {
 ================================ */
 .cart-float {
   position: fixed;
-  bottom: 20px;
-  right: 88px;
+  bottom: 18px;
+  right: 84px;
   width: 55px;
   height: 55px;
   border: none;
@@ -860,32 +922,6 @@ footer {
 }
 
 
-.tracking-float {
-  position: fixed;
-  right: 20px;
-  bottom: 92px;
-  z-index: 1200;
-  border: none;
-  border-radius: 999px;
-  background: #0b2d4d;
-  color: #fff;
-  box-shadow: 0 10px 24px rgba(11, 45, 77, 0.35);
-  padding: 10px 14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.tracking-float:hover {
-  background: #123d66;
-}
-
-.tracking-float-icon {
-  font-size: 1rem;
-}
-
 .cart-availability-note {
   margin: 8px 0 0;
   color: #b42318;
@@ -893,22 +929,10 @@ footer {
   font-weight: 600;
 }
 
-@media (max-width: 640px) {
-  .tracking-float {
-    right: 14px;
-    bottom: 88px;
-    padding: 10px;
-  }
-
-  .tracking-float span:last-child {
-    display: none;
-  }
-}
-
 .auth-float {
   position: fixed;
   right: 20px;
-  bottom: 150px;
+  bottom: 86px;
   z-index: 1200;
   border: none;
   border-radius: 999px;
@@ -928,7 +952,7 @@ footer {
 @media (max-width: 640px) {
   .auth-float {
     right: 14px;
-    bottom: 142px;
+    bottom: 80px;
     padding: 9px;
   }
   .auth-float span:last-child { display: none; }
