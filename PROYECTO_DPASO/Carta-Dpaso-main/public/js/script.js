@@ -39,6 +39,7 @@ let authFeedbackTimer = null;
 let authActiveSection = 'profile';
 let menuDataCache = { platos: [], categorias: [] };
 let categoryCursor = -1;
+const menuRowControllers = new Set();
 
 function getAuthRedirectUrl() {
   return `${window.location.origin}${window.location.pathname}`;
@@ -1429,6 +1430,11 @@ function setAccountSection(section = 'profile') {
   myOrdersBtn?.classList.toggle('active', safeSection === 'orders');
   editProfileBtn?.classList.toggle('active', safeSection === 'profile');
 
+  myOrdersBtn?.classList.toggle('tracking-primary', safeSection === 'orders');
+  myOrdersBtn?.classList.toggle('tracking-ghost', safeSection !== 'orders');
+  editProfileBtn?.classList.toggle('tracking-primary', safeSection === 'profile');
+  editProfileBtn?.classList.toggle('tracking-ghost', safeSection !== 'profile');
+
   const profileView = document.getElementById('authProfileView');
   const ordersView = document.getElementById('authOrdersView');
   if (profileView) {
@@ -1471,8 +1477,8 @@ function updateAuthUi() {
     const email = authSession?.user?.email || authProfile?.email || '-';
     const fullName = authProfile?.name || authSession?.user?.user_metadata?.name || 'Cliente';
     const { firstName, lastName } = splitFullName(fullName);
-    if (authUserInfo) authUserInfo.textContent = `${fullName} · ${email}`;
-    if (authWelcome) authWelcome.textContent = 'Tu sesión está activa. Puedes comprar, editar tu perfil y revisar historial.';
+    if (authUserInfo) authUserInfo.textContent = '';
+    if (authWelcome) authWelcome.textContent = '';
     if (authFloatLabel) authFloatLabel.textContent = 'Mi cuenta';
     if (topbarAccountLabel) topbarAccountLabel.textContent = 'Mi cuenta';
     if (profileFirstName) profileFirstName.value = firstName;
@@ -1490,8 +1496,10 @@ function updateAuthUi() {
         : 'Compra como invitado o ingresa para ver tu historial.';
     }
     if (authFloatLabel) authFloatLabel.textContent = 'Ingresar';
-    if (topbarAccountLabel) topbarAccountLabel.textContent = 'Mi cuenta';
+    if (topbarAccountLabel) topbarAccountLabel.textContent = 'Iniciar sesión';
   }
+
+  renderTopbarAccountMenu();
 }
 
 function openAuthModal() {
@@ -1817,6 +1825,7 @@ async function initAuth() {
   document.getElementById('authRegisterBtn')?.addEventListener('click', handleRegister);
   document.getElementById('authLoginBtn')?.addEventListener('click', handleLogin);
   document.getElementById('authGoogleBtn')?.addEventListener('click', handleGoogleLogin);
+  document.getElementById('authGoogleRegisterBtn')?.addEventListener('click', handleGoogleLogin);
   document.getElementById('authResetLink')?.addEventListener('click', handleResetPassword);
   document.getElementById('authResetSaveBtn')?.addEventListener('click', handleResetPasswordUpdate);
   document.getElementById('authLogoutBtn')?.addEventListener('click', handleLogout);
@@ -2227,6 +2236,189 @@ function setupMenuActiveNav(nav, sections = []) {
 }
 
 
+
+function destroyMenuRowControllers() {
+  menuRowControllers.forEach((controller) => {
+    try { controller.destroy(); } catch (_err) { /* noop */ }
+  });
+  menuRowControllers.clear();
+}
+
+function getMenuRowOriginalWidth(row, cards = []) {
+  if (!row || !cards.length) return 0;
+  const rowStyles = window.getComputedStyle(row);
+  const gap = parseFloat(rowStyles.columnGap || rowStyles.gap || '0') || 0;
+  const cardsWidth = cards.reduce((acc, card) => acc + card.getBoundingClientRect().width, 0);
+  return cardsWidth + (gap * Math.max(0, cards.length - 1));
+}
+
+function initMenuRowCarousel(row) {
+  if (!row) return null;
+
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let originals = Array.from(row.children).filter((el) => !el.hasAttribute('data-carousel-clone'));
+  if (!originals.length) return null;
+
+  let isPointerDown = false;
+  let lastPointerX = 0;
+  let pauseAutoUntil = 0;
+  let rafId = 0;
+  let isHovering = false;
+  let resizeRafId = 0;
+  let autoEnabled = false;
+  let originalWidth = 0;
+
+  const cleanupClones = () => {
+    Array.from(row.querySelectorAll('[data-carousel-clone="true"]')).forEach((clone) => clone.remove());
+  };
+
+  const normalizeCircularScroll = () => {
+    if (!autoEnabled || originalWidth <= 1) return;
+    if (row.scrollLeft >= originalWidth) row.scrollLeft -= originalWidth;
+    if (row.scrollLeft < 0) row.scrollLeft += originalWidth;
+  };
+
+  const pauseAuto = (ms = 1800) => {
+    pauseAutoUntil = Date.now() + ms;
+  };
+
+  const rebuild = () => {
+    cleanupClones();
+    originals = Array.from(row.children).filter((el) => !el.hasAttribute('data-carousel-clone'));
+    originalWidth = getMenuRowOriginalWidth(row, originals);
+    const hasOverflow = originalWidth > (row.clientWidth + 2);
+
+    autoEnabled = hasOverflow && !reducedMotion;
+
+    if (autoEnabled) {
+      const frag = document.createDocumentFragment();
+      originals.forEach((card) => {
+        const clone = card.cloneNode(true);
+        clone.setAttribute('data-carousel-clone', 'true');
+        clone.setAttribute('aria-hidden', 'true');
+        clone.querySelectorAll('button, a, input, select, textarea').forEach((el) => {
+          el.tabIndex = -1;
+          el.setAttribute('aria-hidden', 'true');
+        });
+        frag.appendChild(clone);
+      });
+      row.appendChild(frag);
+    }
+
+    row.classList.toggle('auto-carousel', autoEnabled);
+    row.scrollLeft = 0;
+  };
+
+  const autoStep = () => {
+    if (autoEnabled && !isPointerDown && !isHovering && Date.now() >= pauseAutoUntil) {
+      row.scrollLeft += 0.35;
+      normalizeCircularScroll();
+    }
+    rafId = window.requestAnimationFrame(autoStep);
+  };
+
+  const handlePointerDown = (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    isPointerDown = true;
+    pauseAuto(2400);
+    row.dataset.dragging = 'false';
+    lastPointerX = event.clientX;
+    row.classList.add('dragging');
+    row.setPointerCapture?.(event.pointerId);
+  };
+
+  const handlePointerMove = (event) => {
+    if (!isPointerDown) return;
+    const deltaX = event.clientX - lastPointerX;
+    if (Math.abs(deltaX) > 2) row.dataset.dragging = 'true';
+    row.scrollLeft -= deltaX * 1.35;
+    normalizeCircularScroll();
+    lastPointerX = event.clientX;
+  };
+
+  const releaseDrag = () => {
+    if (!isPointerDown) return;
+    isPointerDown = false;
+    row.classList.remove('dragging');
+    pauseAuto(1800);
+    window.setTimeout(() => { delete row.dataset.dragging; }, 80);
+  };
+
+  const handleWheel = (event) => {
+    const absX = Math.abs(event.deltaX);
+    const absY = Math.abs(event.deltaY);
+
+    if (!event.shiftKey && absY > absX) {
+      pauseAuto(1200);
+      return; // respetar scroll vertical de página
+    }
+
+    const horizontalDelta = absX > 0 ? event.deltaX : event.deltaY;
+    row.scrollLeft += horizontalDelta * 1.1;
+    normalizeCircularScroll();
+    pauseAuto(1600);
+    event.preventDefault();
+  };
+
+  const handleClickCapture = (event) => {
+    if (row.dataset.dragging === 'true') {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
+  const handleResize = () => {
+    if (resizeRafId) window.cancelAnimationFrame(resizeRafId);
+    resizeRafId = window.requestAnimationFrame(() => {
+      rebuild();
+      pauseAuto(900);
+    });
+  };
+
+  row.addEventListener('pointerdown', handlePointerDown);
+  row.addEventListener('pointermove', handlePointerMove);
+  row.addEventListener('pointerup', releaseDrag);
+  row.addEventListener('pointercancel', releaseDrag);
+  row.addEventListener('pointerleave', releaseDrag);
+  row.addEventListener('click', handleClickCapture, true);
+  row.addEventListener('wheel', handleWheel, { passive: false });
+  row.addEventListener('mouseenter', () => { isHovering = true; });
+  row.addEventListener('mouseleave', () => { isHovering = false; pauseAuto(900); });
+  row.addEventListener('touchstart', () => pauseAuto(1700), { passive: true });
+  window.addEventListener('resize', handleResize);
+
+  rebuild();
+  rafId = window.requestAnimationFrame(autoStep);
+
+  return {
+    destroy() {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      if (resizeRafId) window.cancelAnimationFrame(resizeRafId);
+      window.removeEventListener('resize', handleResize);
+      row.removeEventListener('pointerdown', handlePointerDown);
+      row.removeEventListener('pointermove', handlePointerMove);
+      row.removeEventListener('pointerup', releaseDrag);
+      row.removeEventListener('pointercancel', releaseDrag);
+      row.removeEventListener('pointerleave', releaseDrag);
+      row.removeEventListener('click', handleClickCapture, true);
+      row.removeEventListener('wheel', handleWheel);
+      row.classList.remove('dragging', 'auto-carousel');
+      cleanupClones();
+      delete row.dataset.dragging;
+      row.scrollLeft = 0;
+    }
+  };
+}
+
+function setupMenuRowDragScroll(rows = []) {
+  destroyMenuRowControllers();
+  rows.forEach((row) => {
+    const controller = initMenuRowCarousel(row);
+    if (controller) menuRowControllers.add(controller);
+  });
+}
+
+
 function openPlatoModal(item, imageUrl, soldOut = false) {
   const modal = document.getElementById('platoModal');
   const name = document.getElementById('platoModalName');
@@ -2272,7 +2464,68 @@ function setupMenuSearch() {
   const input = document.getElementById('menuSearchInput');
   if (!input) return;
 
+  let userTypedSearch = false;
+
+  const clearSearchInput = () => {
+    if (!input.value) return false;
+    input.value = '';
+    return true;
+  };
+
+  const unlockSearchInput = () => {
+    if (!input.hasAttribute('readonly')) return;
+    input.removeAttribute('readonly');
+  };
+
+  const lockSearchInput = () => {
+    input.setAttribute('readonly', 'readonly');
+  };
+
+  const clearIfLooksLikeAutofill = () => {
+    if (userTypedSearch) return;
+    const value = String(input.value || '').trim();
+    if (!value) return;
+
+    const looksLikeCredential = value.includes('@') || value.includes('gmail.com') || value.includes('hotmail.com') || value.length > 24;
+    if (looksLikeCredential || document.activeElement !== input) {
+      clearSearchInput();
+      cargarMenu();
+    }
+  };
+
+  lockSearchInput();
+  clearSearchInput();
+  window.setTimeout(clearSearchInput, 120);
+  window.setTimeout(clearIfLooksLikeAutofill, 500);
+  window.setTimeout(clearIfLooksLikeAutofill, 1200);
+  window.setTimeout(clearIfLooksLikeAutofill, 2200);
+
+  // Algunos gestores/autofill inyectan después del load; vigilamos y limpiamos solo si parece credencial.
+  window.setInterval(() => {
+    clearIfLooksLikeAutofill();
+  }, 900);
+
+  window.addEventListener('pageshow', () => {
+    userTypedSearch = false;
+    lockSearchInput();
+    clearSearchInput();
+  });
+
+  input.addEventListener('focus', () => {
+    window.setTimeout(() => {
+      unlockSearchInput();
+      clearIfLooksLikeAutofill();
+    }, 80);
+  });
+
+  input.addEventListener('keydown', unlockSearchInput);
+
+  input.addEventListener('blur', () => {
+    if (!input.value) lockSearchInput();
+  });
+
   input.addEventListener('input', () => {
+    userTypedSearch = true;
     cargarMenu();
   });
 
@@ -2284,14 +2537,37 @@ function setupMenuSearch() {
   });
 }
 
+
+function renderTopbarAccountMenu() {
+  const topbarAccountLabel = document.getElementById('topbar-account-label');
+  const menu = document.getElementById('nav-account-menu');
+  const isLogged = Boolean(authSession?.user) && !authRecoveryMode;
+
+  if (topbarAccountLabel) {
+    topbarAccountLabel.textContent = isLogged ? 'Mi cuenta' : 'Iniciar sesión';
+  }
+
+  if (!menu) return;
+
+  menu.innerHTML = isLogged
+    ? `
+      <button id="nav-profile-direct" type="button">Mi perfil</button>
+      <button id="nav-orders-direct" type="button">Historial de pedidos</button>
+      <button id="nav-logout-direct" type="button">Cerrar sesión</button>
+    `
+    : `
+      <button id="nav-login-direct" type="button">Iniciar sesión</button>
+      <button id="nav-register-direct" type="button">Registrarse</button>
+    `;
+}
+
 function setupTopbarShortcuts() {
   const navCartBtn = document.getElementById('nav-cart-btn');
   const navAccountBtn = document.getElementById('nav-account-btn');
   const navTrackingBtn = document.getElementById('nav-tracking-btn');
   const menu = document.getElementById('nav-account-menu');
-  const loginBtn = document.getElementById('nav-login-direct');
-  const registerBtn = document.getElementById('nav-register-direct');
 
+  renderTopbarAccountMenu();
   navCartBtn?.addEventListener('click', openCartModal);
   navTrackingBtn?.addEventListener('click', () => openTrackingModal());
 
@@ -2301,14 +2577,40 @@ function setupTopbarShortcuts() {
     if (menu) menu.setAttribute('aria-hidden', menu.classList.contains('open') ? 'false' : 'true');
   });
 
-  loginBtn?.addEventListener('click', () => {
-    menu?.classList.remove('open');
-    openAuthModalInMode('login');
-  });
+  menu?.addEventListener('click', async (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
 
-  registerBtn?.addEventListener('click', () => {
-    menu?.classList.remove('open');
-    openAuthModalInMode('register');
+    if (target.id === 'nav-login-direct') {
+      menu.classList.remove('open');
+      openAuthModalInMode('login');
+      return;
+    }
+
+    if (target.id === 'nav-register-direct') {
+      menu.classList.remove('open');
+      openAuthModalInMode('register');
+      return;
+    }
+
+    if (target.id === 'nav-profile-direct') {
+      menu.classList.remove('open');
+      setAccountSection('profile');
+      openAuthModal();
+      return;
+    }
+
+    if (target.id === 'nav-orders-direct') {
+      menu.classList.remove('open');
+      openAuthModal();
+      await openMyOrdersModal();
+      return;
+    }
+
+    if (target.id === 'nav-logout-direct') {
+      menu.classList.remove('open');
+      await handleLogout();
+    }
   });
 
   document.addEventListener('click', (e) => {
@@ -2348,6 +2650,7 @@ async function cargarMenu() {
 
     const searchTerm = String(document.getElementById('menuSearchInput')?.value || '').trim().toLowerCase();
 
+    destroyMenuRowControllers();
     menu.innerHTML = '';
     nav.innerHTML = '';
 
@@ -2393,8 +2696,22 @@ async function cargarMenu() {
             <h3>${item.nombre}</h3>
             <p>${item.descripcion || ''}</p>
             <span>${formatCurrency(item.precio)}</span>
+            <button class="plato-add-mini" type="button" aria-label="Agregar ${item.nombre} al pedido" ${soldOut ? 'disabled' : ''}>＋ Agregar</button>
             ${stockText}
           `;
+
+          const quickAddBtn = div.querySelector('.plato-add-mini');
+          quickAddBtn?.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (soldOut) return;
+            addToCart({
+              id: item.id,
+              nombre: item.nombre,
+              precio: item.precio,
+              imagen: imageUrl
+            });
+            showCartToast(`✅ ${item.nombre} agregado al carrito`);
+          });
 
           div.addEventListener('click', () => {
             openPlatoModal(item, imageUrl, soldOut);
@@ -2409,6 +2726,7 @@ async function cargarMenu() {
     });
 
     if (!menu.querySelector('.section-title')) {
+      destroyMenuRowControllers();
       menu.innerHTML = '<p>No hay resultados para tu búsqueda. Prueba con otro término.</p>';
       return;
     }
@@ -2425,9 +2743,13 @@ async function cargarMenu() {
     const sectionTitles = Array.from(menu.querySelectorAll('.section-title'));
     setupMenuActiveNav(nav, sectionTitles);
 
+    const menuRows = Array.from(menu.querySelectorAll('.menu-row'));
+    setupMenuRowDragScroll(menuRows);
+
     document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
   } catch (err) {
     console.error('❌ Error cargando menú:', err);
+    destroyMenuRowControllers();
     menu.innerHTML = '<p>Error cargando el menú. Revisa la consola.</p>';
   }
 }
