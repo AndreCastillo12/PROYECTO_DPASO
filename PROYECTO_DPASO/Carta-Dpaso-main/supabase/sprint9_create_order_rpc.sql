@@ -99,6 +99,8 @@ declare
 
   v_order_id uuid;
   v_customer_id uuid;
+  v_customer_user_id uuid;
+  v_uid uuid;
   v_short_id text;
   v_created_at timestamptz;
 
@@ -209,17 +211,28 @@ begin
     end if;
   end if;
 
-  insert into public.customers(name, phone, normalized_phone)
+  v_uid := auth.uid();
+
+  insert into public.customers(name, phone, normalized_phone, user_id)
   values (
     v_name,
     v_phone,
-    nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), '')
+    nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
+    v_uid
   )
   on conflict (phone) do update
     set name = excluded.name,
         normalized_phone = excluded.normalized_phone,
+        user_id = case
+          when public.customers.user_id is null and excluded.user_id is not null then excluded.user_id
+          else public.customers.user_id
+        end,
         updated_at = now()
-  returning id into v_customer_id;
+  returning id, user_id into v_customer_id, v_customer_user_id;
+
+  if v_uid is not null and v_customer_user_id is not null and v_customer_user_id <> v_uid then
+    raise exception 'PHONE_ALREADY_LINKED';
+  end if;
 
   insert into public.orders (
     nombre_cliente,
@@ -234,6 +247,7 @@ begin
     provincia,
     distrito,
     customer_id,
+    user_id,
     short_code
   ) values (
     v_name,
@@ -248,7 +262,7 @@ begin
     v_provincia,
     v_distrito,
     v_customer_id,
-    null
+    v_uid
   )
   returning id, created_at into v_order_id, v_created_at;
 
