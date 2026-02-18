@@ -34,8 +34,12 @@ create table if not exists public.customers (
 
 create unique index if not exists customers_phone_uidx on public.customers(phone);
 
+alter table if exists public.customers
+  add column if not exists user_id uuid references auth.users(id);
+
 alter table if exists public.orders
-  add column if not exists customer_id uuid references public.customers(id);
+  add column if not exists customer_id uuid references public.customers(id),
+  add column if not exists user_id uuid references auth.users(id);
 
 create index if not exists orders_customer_id_idx on public.orders(customer_id);
 
@@ -72,6 +76,10 @@ comment on column public.orders.distrito is 'Distrito de entrega para modalidad 
 -- ---------------------------------------------------------------------------
 -- RPC transaccional
 -- ---------------------------------------------------------------------------
+-- Diagnóstico recomendado en SQL Editor (manual):
+-- select pg_get_functiondef('public.create_order(jsonb)'::regprocedure);
+-- select column_name from information_schema.columns where table_schema='public' and table_name='orders' order by ordinal_position;
+-- select column_name from information_schema.columns where table_schema='public' and table_name='order_items' order by ordinal_position;
 drop function if exists public.create_order(jsonb);
 
 create or replace function public.create_order(payload jsonb)
@@ -99,6 +107,8 @@ declare
 
   v_order_id uuid;
   v_customer_id uuid;
+  v_customer_user_id uuid;
+  v_uid uuid;
   v_short_id text;
   v_created_at timestamptz;
 
@@ -209,17 +219,28 @@ begin
     end if;
   end if;
 
-  insert into public.customers(name, phone, normalized_phone)
+  v_uid := auth.uid();
+
+  insert into public.customers(name, phone, normalized_phone, user_id)
   values (
     v_name,
     v_phone,
-    nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), '')
+    nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
+    v_uid
   )
   on conflict (phone) do update
     set name = excluded.name,
         normalized_phone = excluded.normalized_phone,
+        user_id = case
+          when public.customers.user_id is null and excluded.user_id is not null then excluded.user_id
+          else public.customers.user_id
+        end,
         updated_at = now()
-  returning id into v_customer_id;
+  returning id, user_id into v_customer_id, v_customer_user_id;
+
+  if v_uid is not null and v_customer_user_id is not null and v_customer_user_id <> v_uid then
+    raise exception 'PHONE_ALREADY_LINKED';
+  end if;
 
   insert into public.orders (
     nombre_cliente,
@@ -234,6 +255,7 @@ begin
     provincia,
     distrito,
     customer_id,
+    user_id,
     short_code
   ) values (
     v_name,
@@ -248,6 +270,7 @@ begin
     v_provincia,
     v_distrito,
     v_customer_id,
+    v_uid,
     null
   )
   returning id, created_at into v_order_id, v_created_at;
