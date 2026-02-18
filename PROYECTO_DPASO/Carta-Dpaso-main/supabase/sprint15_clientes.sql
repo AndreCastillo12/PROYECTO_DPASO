@@ -6,6 +6,7 @@ create table if not exists public.customers (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   phone text not null,
+  user_id uuid references auth.users(id),
   normalized_phone text,
   total_orders integer not null default 0,
   total_spent numeric(12,2) not null default 0,
@@ -15,6 +16,7 @@ create table if not exists public.customers (
 );
 
 alter table if exists public.customers
+  add column if not exists user_id uuid references auth.users(id),
   add column if not exists normalized_phone text,
   add column if not exists total_orders integer not null default 0,
   add column if not exists total_spent numeric(12,2) not null default 0,
@@ -23,13 +25,16 @@ alter table if exists public.customers
   add column if not exists updated_at timestamptz not null default now();
 
 create unique index if not exists customers_phone_uidx on public.customers(phone);
+create unique index if not exists customers_user_id_uidx on public.customers(user_id) where user_id is not null;
 create index if not exists customers_last_order_idx on public.customers(last_order_at desc);
 create index if not exists customers_total_spent_idx on public.customers(total_spent desc);
 
 alter table if exists public.orders
-  add column if not exists customer_id uuid references public.customers(id);
+  add column if not exists customer_id uuid references public.customers(id),
+  add column if not exists user_id uuid references auth.users(id);
 
 create index if not exists orders_customer_id_idx on public.orders(customer_id);
+create index if not exists orders_user_id_idx on public.orders(user_id);
 
 create or replace function public.set_updated_at_customers()
 returns trigger

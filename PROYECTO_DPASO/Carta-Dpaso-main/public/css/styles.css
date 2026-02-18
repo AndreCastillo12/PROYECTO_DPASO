@@ -80,6 +80,28 @@ body {
   opacity: 0.9;
 }
 
+.header-account {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.auth-account-btn,
+.auth-history-btn {
+  border: 1px solid rgba(255,255,255,.5);
+  background: transparent;
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-account-btn:hover,
+.auth-history-btn:hover {
+  background: rgba(255,255,255,.12);
+}
+
 /* ===============================
    NAV
 ================================ */
@@ -896,4 +918,28 @@ footer {
   .tracking-float span:last-child {
     display: none;
   }
+}
+
+
+.auth-modal-card {
+  max-width: 440px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.history-list {
+  display: grid;
+  gap: 8px;
+  max-height: 340px;
+  overflow: auto;
+}
+
+.history-item {
+  border: 1px solid #d0d5dd;
+  border-radius: 12px;
+  padding: 10px;
+  background: #fff;
 }

@@ -22,6 +22,111 @@ let lastOrderCode = '';
 let trackingIntervalId = null;
 let trackingLastCode = '';
 
+const appRuntime = window.__dpaso_runtime || {
+  inited: false,
+  initCounter: 0,
+  checkoutSubmitCounter: 0,
+  authMode: 'login',
+  authBusy: false,
+  authSubscription: null,
+  authUnsubscribe: null
+};
+window.__dpaso_runtime = appRuntime;
+if (typeof window.__dpasoSubmitting !== 'boolean') window.__dpasoSubmitting = false;
+
+if (!(appRuntime.listenerScopes instanceof Map)) appRuntime.listenerScopes = new Map();
+if (!appRuntime.listenerStats || typeof appRuntime.listenerStats !== 'object') appRuntime.listenerStats = {};
+if (!(appRuntime.boundActionKeys instanceof Set)) appRuntime.boundActionKeys = new Set();
+if (!(appRuntime.scopeControllers instanceof Map)) appRuntime.scopeControllers = new Map();
+if (!('lastAuthUserId' in appRuntime)) appRuntime.lastAuthUserId = null;
+if (!('lastAuthEvent' in appRuntime)) appRuntime.lastAuthEvent = '';
+
+function resetGlobalEventWiring() {
+  appRuntime.scopeControllers.forEach((controller) => controller.abort());
+  appRuntime.scopeControllers = new Map();
+  appRuntime.listenerScopes = new Map();
+  appRuntime.listenerStats = {};
+  appRuntime.boundActionKeys = new Set();
+}
+
+function getOrCreateListenerScope(scopeName) {
+  const previousController = appRuntime.scopeControllers.get(scopeName);
+  if (previousController) previousController.abort();
+
+  const controller = new AbortController();
+  appRuntime.scopeControllers.set(scopeName, controller);
+
+  const scope = {
+    name: scopeName,
+    actions: new Set(),
+    controller
+  };
+
+  appRuntime.listenerScopes.set(scopeName, scope);
+  return scope;
+}
+
+function bindScopedListener(scope, target, type, handler, options = {}, actionKey = null) {
+  if (!scope || !target || !target.addEventListener) return;
+
+  const key = actionKey || `${scope.name}:${type}`;
+  if (scope.actions.has(key)) {
+    console.warn(`⚠️ Doble bind detectado en scope=${scope.name}, action=${key}`);
+    console.warn(new Error('Double bind guard stack').stack);
+  }
+  scope.actions.add(key);
+
+  appRuntime.listenerStats[key] = Number(appRuntime.listenerStats[key] || 0) + 1;
+
+  if (appRuntime.boundActionKeys.has(key)) {
+    console.warn(`⚠️ Acción ya estaba registrada previamente: ${key}`);
+    console.warn(new Error('Repeated action stack').stack);
+  }
+  appRuntime.boundActionKeys.add(key);
+
+  const finalOptions = { ...options, signal: scope.controller.signal };
+  target.addEventListener(type, handler, finalOptions);
+}
+
+function logListenerStats(scopeName = '') {
+  const prefix = scopeName ? `${scopeName}:` : '';
+  const stats = Object.keys(appRuntime.listenerStats)
+    .filter((key) => !prefix || key.startsWith(prefix))
+    .sort()
+    .map((key) => ({ action: key, binds: appRuntime.listenerStats[key] }));
+
+  console.log(`🧩 Listener debug${scopeName ? ` [${scopeName}]` : ''}:`, stats);
+}
+
+function getFallbackFocusElement(...ids) {
+  for (const id of ids) {
+    const node = document.getElementById(id);
+    if (node && typeof node.focus === 'function' && !node.hasAttribute('disabled')) return node;
+  }
+  return null;
+}
+
+function openModalSafe(modal, focusNode = null) {
+  if (!modal) return;
+  modal.removeAttribute('inert');
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  if (focusNode && typeof focusNode.focus === 'function') focusNode.focus();
+}
+
+function closeModalSafe(modal, fallbackFocusNode = null) {
+  if (!modal) return;
+
+  const active = document.activeElement;
+  if (active && modal.contains(active) && fallbackFocusNode && typeof fallbackFocusNode.focus === 'function') {
+    fallbackFocusNode.focus();
+  }
+
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  modal.setAttribute('inert', '');
+}
+
 const STATUS_ORDER = ['pending', 'accepted', 'preparing', 'ready', 'dispatched', 'delivered', 'completed', 'cancelled'];
 
 const DEFAULT_STORE_SETTINGS = {
@@ -232,10 +337,8 @@ function openTrackingModal(prefillCode = '') {
 
   const codeToUse = normalizeTrackingCode(prefillCode) || getLastTrackingCode();
 
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
   if (codeToUse) input.value = codeToUse;
-  input.focus();
+  openModalSafe(modal, input);
   refreshTrackingLastButton();
 
   if (codeToUse && prefillCode) {
@@ -246,8 +349,7 @@ function openTrackingModal(prefillCode = '') {
 function closeTrackingModal() {
   const modal = document.getElementById('trackingModal');
   if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
+  closeModalSafe(modal, getFallbackFocusElement('tracking-float-btn', 'btnTracking', 'cart-float-btn'));
   stopTrackingAutoRefresh();
 }
 
@@ -342,6 +444,7 @@ async function fetchOrderStatus(code, options = {}) {
 }
 
 function setupTrackingEvents() {
+  const scope = getOrCreateListenerScope('tracking');
   const openBtn = document.getElementById('btnTracking');
   const floatBtn = document.getElementById('tracking-float-btn');
   const closeBtn = document.getElementById('trackingCloseBtn');
@@ -351,51 +454,53 @@ function setupTrackingEvents() {
   const input = document.getElementById('trackingCode');
   const modal = document.getElementById('trackingModal');
 
-  openBtn?.addEventListener('click', (event) => {
+  bindScopedListener(scope, openBtn, 'click', (event) => {
     event.preventDefault();
     openTrackingModal();
-  });
+  }, {}, 'tracking:open-link');
 
-  floatBtn?.addEventListener('click', () => {
+  bindScopedListener(scope, floatBtn, 'click', () => {
     openTrackingModal();
-  });
+  }, {}, 'tracking:open-float');
 
-  closeBtn?.addEventListener('click', closeTrackingModal);
+  bindScopedListener(scope, closeBtn, 'click', closeTrackingModal, {}, 'tracking:close-btn');
 
-  searchBtn?.addEventListener('click', () => {
+  bindScopedListener(scope, searchBtn, 'click', () => {
     fetchOrderStatus(input?.value || '');
-  });
+  }, {}, 'tracking:search-btn');
 
-  refreshBtn?.addEventListener('click', () => {
+  bindScopedListener(scope, refreshBtn, 'click', () => {
     if (!trackingLastCode) return;
     fetchOrderStatus(trackingLastCode);
-  });
+  }, {}, 'tracking:refresh-btn');
 
-  lastBtn?.addEventListener('click', () => {
+  bindScopedListener(scope, lastBtn, 'click', () => {
     const lastCode = getLastTrackingCode();
     if (!lastCode) return;
     if (input) input.value = lastCode;
     fetchOrderStatus(lastCode);
-  });
+  }, {}, 'tracking:last-btn');
 
-  input?.addEventListener('keydown', (event) => {
+  bindScopedListener(scope, input, 'keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
       fetchOrderStatus(input.value);
     }
-  });
+  }, {}, 'tracking:enter-search');
 
-  modal?.addEventListener('click', (event) => {
+  bindScopedListener(scope, modal, 'click', (event) => {
     if (event.target === modal) closeTrackingModal();
-  });
+  }, {}, 'tracking:backdrop-close');
 
   refreshTrackingLastButton();
 
-  document.addEventListener('keydown', (event) => {
+  bindScopedListener(scope, document, 'keydown', (event) => {
     if (event.key === 'Escape' && modal?.classList.contains('open')) {
       closeTrackingModal();
     }
-  });
+  }, {}, 'tracking:escape-close');
+
+  logListenerStats('tracking');
 }
 
 
@@ -741,15 +846,13 @@ function buildWhatsAppMessage(orderData) {
 function openReceiptModal() {
   const modal = document.getElementById('receipt-modal');
   if (!modal) return;
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
+  openModalSafe(modal, document.getElementById('receipt-close-btn'));
 }
 
 function closeReceiptModal() {
   const modal = document.getElementById('receipt-modal');
   if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
+  closeModalSafe(modal, getFallbackFocusElement('cart-float-btn', 'auth-account-btn'));
 }
 
 function renderReceipt(orderData) {
@@ -1012,8 +1115,7 @@ function clearCartAndForm() {
 function openCartModal() {
   const modal = document.getElementById('cart-modal');
   if (!modal) return;
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
+  openModalSafe(modal, document.getElementById('cart-close-btn'));
   getStoreSettings();
   getDeliveryZones();
   refreshCartAvailability().then(() => renderCartModal());
@@ -1022,8 +1124,7 @@ function openCartModal() {
 function closeCartModal() {
   const modal = document.getElementById('cart-modal');
   if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
+  closeModalSafe(modal, getFallbackFocusElement('cart-float-btn', 'auth-account-btn'));
 }
 
 function renderCartModal() {
@@ -1125,6 +1226,7 @@ function updateDireccionRequired() {
 
 
 function setupCartModalEvents() {
+  const scope = getOrCreateListenerScope('cart');
   const cartButton = document.getElementById('cart-float-btn');
   const closeButton = document.getElementById('cart-close-btn');
   const modal = document.getElementById('cart-modal');
@@ -1135,26 +1237,29 @@ function setupCartModalEvents() {
   const receiptModal = document.getElementById('receipt-modal');
   const receiptCloseBtn = document.getElementById('receipt-close-btn');
   const trackOrderBtn = document.getElementById('btnVerEstadoPedido');
+  const provincia = document.getElementById('checkout-provincia');
+  const distrito = document.getElementById('checkout-distrito');
 
-  cartButton?.addEventListener('click', openCartModal);
-  closeButton?.addEventListener('click', closeCartModal);
+  bindScopedListener(scope, cartButton, 'click', openCartModal, {}, 'cart:open');
+  bindScopedListener(scope, closeButton, 'click', closeCartModal, {}, 'cart:close');
 
-  modal?.addEventListener('click', (e) => {
+  bindScopedListener(scope, modal, 'click', (e) => {
     if (e.target === modal) closeCartModal();
-  });
+  }, {}, 'cart:backdrop-close');
 
-  receiptModal?.addEventListener('click', (e) => {
+  bindScopedListener(scope, receiptModal, 'click', (e) => {
     if (e.target === receiptModal) closeReceiptModal();
-  });
+  }, {}, 'receipt:backdrop-close');
 
-  receiptCloseBtn?.addEventListener('click', closeReceiptModal);
-  trackOrderBtn?.addEventListener('click', () => {
+  bindScopedListener(scope, receiptCloseBtn, 'click', closeReceiptModal, {}, 'receipt:close-btn');
+
+  bindScopedListener(scope, trackOrderBtn, 'click', () => {
     const code = lastOrderCode || lastOrderData?.short_id || '';
     closeReceiptModal();
     openTrackingModal(code);
-  });
+  }, {}, 'receipt:open-tracking');
 
-  itemsContainer?.addEventListener('click', (e) => {
+  bindScopedListener(scope, itemsContainer, 'click', (e) => {
     if (checkoutStepOpen) return;
 
     const target = e.target;
@@ -1167,14 +1272,11 @@ function setupCartModalEvents() {
     if (action === 'minus') changeCartQty(id, -1);
     if (action === 'plus') changeCartQty(id, 1);
     if (action === 'delete') removeCartItem(id);
-  });
+  }, {}, 'cart:items-actions');
 
-  modalidad?.addEventListener('change', updateDireccionRequired);
+  bindScopedListener(scope, modalidad, 'change', updateDireccionRequired, {}, 'checkout:modalidad-change');
 
-  const provincia = document.getElementById('checkout-provincia');
-  const distrito = document.getElementById('checkout-distrito');
-
-  provincia?.addEventListener('change', () => {
+  bindScopedListener(scope, provincia, 'change', () => {
     const districts = getDistrictsByProvincia(provincia.value);
     if (distrito) {
       distrito.innerHTML = '<option value="">Selecciona distrito</option>';
@@ -1186,12 +1288,11 @@ function setupCartModalEvents() {
       });
     }
     updateCartTotalsAndAvailability();
-  });
+  }, {}, 'checkout:provincia-change');
 
-  distrito?.addEventListener('change', updateCartTotalsAndAvailability);
+  bindScopedListener(scope, distrito, 'change', updateCartTotalsAndAvailability, {}, 'checkout:distrito-change');
 
-
-  goCheckoutBtn?.addEventListener('click', () => {
+  bindScopedListener(scope, goCheckoutBtn, 'click', () => {
     checkoutStepOpen = true;
     toggleCheckoutSection(true);
     renderCartModal();
@@ -1202,46 +1303,62 @@ function setupCartModalEvents() {
     }
     clearFeedback();
     updateDireccionRequired();
-  });
+  }, {}, 'checkout:open-step');
 
-  backToCartBtn?.addEventListener('click', () => {
+  bindScopedListener(scope, backToCartBtn, 'click', () => {
     checkoutStepOpen = false;
     toggleCheckoutSection(false);
     clearFeedback();
     renderCartModal();
-  });
+  }, {}, 'checkout:back-step');
 
-  document.getElementById('download-receipt-btn')?.addEventListener('click', () => downloadReceiptPdf(lastOrderData));
-  document.getElementById('checkout-form')?.addEventListener('submit', submitOrder);
+  bindScopedListener(scope, document.getElementById('download-receipt-btn'), 'click', () => downloadReceiptPdf(lastOrderData), {}, 'receipt:download');
+
+  logListenerStats('cart');
 }
+
 
 // ===============================
 // CHECKOUT + SUPABASE
 // ===============================
-async function submitOrder(event) {
-  event.preventDefault();
+async function submitOrder(eventOrForm) {
+  if (eventOrForm?.preventDefault) eventOrForm.preventDefault();
 
-  if (orderSubmitBusy) return;
+  if (orderSubmitBusy || window.__dpasoSubmitting) return;
 
-  const form = event.currentTarget;
+  appRuntime.checkoutSubmitCounter += 1;
+  console.log(`🧾 submitOrder intento #${appRuntime.checkoutSubmitCounter}`);
+
+  const form = eventOrForm?.currentTarget || eventOrForm;
   const submitBtn = document.getElementById('confirm-order-btn');
+  if (!form || !(form instanceof HTMLFormElement)) return;
+
   const whatsappBtn = document.getElementById('whatsapp-order-btn');
 
-  if (whatsappBtn) {
-    whatsappBtn.style.display = 'none';
-    whatsappBtn.href = '#';
-  }
+  orderSubmitBusy = true;
+  window.__dpasoSubmitting = true;
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Procesando...';
 
-  clearFeedback();
-  hideReceipt();
-  closeReceiptModal();
+  let rpcPayload = null;
+  let orderId = null;
 
-  if (!cart.length) {
-    showFeedback('El carrito está vacío. Agrega al menos un plato.', 'error');
-    return;
-  }
+  try {
+    if (whatsappBtn) {
+      whatsappBtn.style.display = 'none';
+      whatsappBtn.href = '#';
+    }
 
-  await refreshCartAvailability();
+    clearFeedback();
+    hideReceipt();
+    closeReceiptModal();
+
+    if (!cart.length) {
+      showFeedback('El carrito está vacío. Agrega al menos un plato.', 'error');
+      return;
+    }
+
+    await refreshCartAvailability();
 
   const formData = new FormData(form);
   const unavailableItems = getUnavailableCartItems();
@@ -1336,7 +1453,7 @@ async function submitOrder(event) {
     return;
   }
 
-  const rpcPayload = {
+  rpcPayload = {
     customer: {
       name: customerName,
       phone: telefonoLimpio,
@@ -1360,14 +1477,10 @@ async function submitOrder(event) {
     }
   };
 
-  let orderId = null;
   let shortId = '';
   let shortCode = '';
   let createdAt = null;
 
-  try {
-    orderSubmitBusy = true;
-    submitBtn.disabled = true;
     submitBtn.textContent = 'Creando pedido...';
 
     console.log('📦 Payload RPC create_order:', getSafeOrderPayloadForLogs(rpcPayload));
@@ -1423,7 +1536,7 @@ async function submitOrder(event) {
 
     clearCartAndForm();
   } catch (error) {
-    console.error('❌ Error creando pedido vía RPC:', {
+    console.error('❌ Error creando pedido vía RPC:', error, {
       message: error?.message,
       details: error?.details,
       hint: error?.hint,
@@ -1432,7 +1545,9 @@ async function submitOrder(event) {
       payload: getSafeOrderPayloadForLogs(rpcPayload)
     });
     const errorMessage = String(error?.message || '');
-    if (errorMessage.includes('OUT_OF_STOCK') || errorMessage.includes('NOT_AVAILABLE')) {
+    if (errorMessage.includes('PHONE_ALREADY_LINKED')) {
+      showFeedback('Este teléfono ya está vinculado a otra cuenta. Usa otro teléfono o inicia sesión con la cuenta correcta.', 'error');
+    } else if (errorMessage.includes('OUT_OF_STOCK') || errorMessage.includes('NOT_AVAILABLE')) {
       showFeedback('Algunos productos ya no están disponibles, elimínalos del carrito.', 'error');
       await cargarMenu();
     } else {
@@ -1440,6 +1555,7 @@ async function submitOrder(event) {
     }
   } finally {
     orderSubmitBusy = false;
+    window.__dpasoSubmitting = false;
     submitBtn.disabled = false;
     submitBtn.textContent = 'Confirmar pedido';
     updateCartTotalsAndAvailability();
@@ -1552,13 +1668,330 @@ window.refreshMenu = async function () {
   await cargarMenu();
 };
 
-// ===============================
-// INIT
-// ===============================
-window.addEventListener('load', async () => {
+function setupCheckoutSubmitDelegation() {
+  const scope = getOrCreateListenerScope('checkout-submit');
+
+  bindScopedListener(scope, document, 'click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const submitBtn = target.closest('[data-action="submit-order"]');
+    if (!submitBtn) return;
+
+    event.preventDefault();
+    const form = document.getElementById('checkout-form');
+    if (!form) return;
+    submitOrder(form);
+  }, {}, 'checkout:submit-click');
+
+  bindScopedListener(scope, document.getElementById('checkout-form'), 'submit', (event) => {
+    event.preventDefault();
+    submitOrder(event.currentTarget);
+  }, {}, 'checkout:submit-form');
+
+  logListenerStats('checkout-submit');
+}
+
+
+function showAuthFeedback(message = '', type = 'info') {
+  const feedback = document.getElementById('auth-feedback');
+  if (!feedback) return;
+  feedback.textContent = message;
+  feedback.className = `checkout-feedback ${type}`;
+}
+
+function setAuthMode(mode = 'login') {
+  const normalized = mode === 'register' ? 'register' : 'login';
+  appRuntime.authMode = normalized;
+  const title = document.getElementById('auth-modal-title');
+  const submitBtn = document.getElementById('auth-submit-btn');
+  const toggleBtn = document.getElementById('auth-toggle-btn');
+  const nameInput = document.getElementById('auth-name');
+  const phoneInput = document.getElementById('auth-phone');
+
+  if (title) title.textContent = normalized === 'register' ? 'Crear cuenta' : 'Iniciar sesión';
+  if (submitBtn) submitBtn.textContent = normalized === 'register' ? 'Registrarme' : 'Entrar';
+  if (toggleBtn) toggleBtn.textContent = normalized === 'register' ? 'Ya tengo cuenta' : 'Crear cuenta';
+  if (nameInput) nameInput.required = normalized === 'register';
+  if (phoneInput) phoneInput.required = normalized === 'register';
+  showAuthFeedback('');
+}
+
+function openAuthModal() {
+  const modal = document.getElementById('auth-modal');
+  if (!modal) return;
+  openModalSafe(modal, document.getElementById('auth-email'));
+}
+
+function closeAuthModal() {
+  const modal = document.getElementById('auth-modal');
+  if (!modal) return;
+  closeModalSafe(modal, getFallbackFocusElement('auth-account-btn', 'cart-float-btn'));
+}
+
+function openHistoryModal() {
+  const modal = document.getElementById('history-modal');
+  if (!modal) return;
+  openModalSafe(modal, document.getElementById('history-close-btn'));
+}
+
+function closeHistoryModal() {
+  const modal = document.getElementById('history-modal');
+  if (!modal) return;
+  closeModalSafe(modal, getFallbackFocusElement('auth-history-btn', 'auth-account-btn'));
+}
+
+async function loadOrderHistory() {
+  const list = document.getElementById('history-list');
+  if (!list) return;
+  list.innerHTML = '<p class="tracking-muted">Cargando historial...</p>';
+
+  const { data: sessionData } = await supabaseClient.auth.getSession();
+  const userId = sessionData?.session?.user?.id;
+  if (!userId) {
+    list.innerHTML = '<p class="tracking-muted">Inicia sesión para ver tu historial.</p>';
+    return;
+  }
+
+  try {
+    let data = null;
+    const { data: rpcData, error: rpcError } = await supabaseClient.rpc('get_my_orders');
+
+    if (rpcError) {
+      const isMissingRpc = String(rpcError?.message || '').includes('get_my_orders')
+        || String(rpcError?.code || '') === 'PGRST202';
+
+      if (!isMissingRpc) throw rpcError;
+
+      console.warn('⚠️ get_my_orders no disponible, usando fallback por tabla orders');
+      const { data: fallbackData, error: fallbackError } = await supabaseClient
+        .from('orders')
+        .select('id,created_at,total,estado,short_code,modalidad')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (fallbackError) throw fallbackError;
+      data = fallbackData;
+    } else {
+      data = rpcData;
+    }
+
+    if (!data || data.length === 0) {
+      list.innerHTML = '<p class="tracking-muted">Aún no tienes pedidos.</p>';
+      return;
+    }
+
+    list.innerHTML = data.map((order) => `
+      <article class="history-item">
+        <p><strong>${order.short_code || getShortOrderId(order.id)}</strong> · ${humanTrackingStatus(order.estado)}</p>
+        <p>${formatTrackingDate(order.created_at)} · ${order.modalidad || '-'}</p>
+        <p><strong>${formatCurrency(order.total || 0)}</strong></p>
+      </article>
+    `).join('');
+  } catch (error) {
+    console.error('❌ Error cargando historial:', error);
+    list.innerHTML = '<p class="tracking-muted">No se pudo cargar el historial.</p>';
+  }
+}
+
+function applyAuthUi(user = null) {
+  const accountBtn = document.getElementById('auth-account-btn');
+  const historyBtn = document.getElementById('auth-history-btn');
+  const checkoutName = document.getElementById('checkout-nombre');
+  const checkoutPhone = document.getElementById('checkout-telefono');
+
+  if (accountBtn) accountBtn.textContent = user ? 'Cerrar sesión' : 'Iniciar sesión';
+  if (historyBtn) historyBtn.style.display = user ? 'inline-flex' : 'none';
+
+  if (user) {
+    const profileName = user.user_metadata?.name || '';
+    const profilePhone = user.user_metadata?.phone || '';
+    if (checkoutName && profileName) checkoutName.value = profileName;
+    if (checkoutPhone && profilePhone) checkoutPhone.value = profilePhone;
+  }
+}
+
+async function refreshAuthUi() {
+  const { data: sessionData } = await supabaseClient.auth.getSession();
+  let user = sessionData?.session?.user || null;
+
+  if (!user) {
+    const { data } = await supabaseClient.auth.getUser();
+    user = data?.user || null;
+  }
+
+  applyAuthUi(user);
+}
+
+function setupAuthEvents() {
+  const scope = getOrCreateListenerScope('auth');
+
+  const accountBtn = document.getElementById('auth-account-btn');
+  const historyBtn = document.getElementById('auth-history-btn');
+  const authModal = document.getElementById('auth-modal');
+  const historyModal = document.getElementById('history-modal');
+  const closeBtn = document.getElementById('auth-close-btn');
+  const closeHistoryBtn = document.getElementById('history-close-btn');
+  const toggleBtn = document.getElementById('auth-toggle-btn');
+  const authForm = document.getElementById('auth-form');
+
+  bindScopedListener(scope, accountBtn, 'click', async () => {
+    const { data } = await supabaseClient.auth.getSession();
+    const user = data?.session?.user || null;
+    if (!user) {
+      setAuthMode('login');
+      openAuthModal();
+      return;
+    }
+
+    if (accountBtn) accountBtn.disabled = true;
+
+    try {
+      const { error } = await supabaseClient.auth.signOut({ scope: 'local' });
+      if (error) throw error;
+      appRuntime.lastAuthEvent = 'SIGNED_OUT';
+      appRuntime.lastAuthUserId = null;
+      applyAuthUi(null);
+      closeAuthModal();
+      closeHistoryModal();
+    } catch (error) {
+      console.error('❌ Error cerrando sesión:', error);
+      await refreshAuthUi();
+    } finally {
+      if (accountBtn) accountBtn.disabled = false;
+    }
+  }, {}, 'auth:account-btn');
+
+  bindScopedListener(scope, historyBtn, 'click', async () => {
+    openHistoryModal();
+    await loadOrderHistory();
+  }, {}, 'auth:history-open');
+
+  bindScopedListener(scope, toggleBtn, 'click', () => {
+    setAuthMode(appRuntime.authMode === 'login' ? 'register' : 'login');
+  }, {}, 'auth:toggle-mode');
+
+  bindScopedListener(scope, closeBtn, 'click', closeAuthModal, {}, 'auth:close-modal');
+  bindScopedListener(scope, closeHistoryBtn, 'click', closeHistoryModal, {}, 'auth:close-history');
+
+  bindScopedListener(scope, authModal, 'click', (event) => {
+    if (event.target === authModal) closeAuthModal();
+  }, {}, 'auth:backdrop-close');
+
+  bindScopedListener(scope, historyModal, 'click', (event) => {
+    if (event.target === historyModal) closeHistoryModal();
+  }, {}, 'auth:history-backdrop-close');
+
+  bindScopedListener(scope, authForm, 'submit', async (event) => {
+    event.preventDefault();
+    if (appRuntime.authBusy) return;
+
+    const submitBtn = document.getElementById('auth-submit-btn');
+    const name = String(document.getElementById('auth-name')?.value || '').trim();
+    const phone = String(document.getElementById('auth-phone')?.value || '').replace(/\D+/g, '');
+    const email = String(document.getElementById('auth-email')?.value || '').trim();
+    const password = String(document.getElementById('auth-password')?.value || '');
+
+    try {
+      appRuntime.authBusy = true;
+      if (submitBtn) submitBtn.disabled = true;
+      showAuthFeedback('Procesando...', 'info');
+
+      if (appRuntime.authMode === 'register') {
+        const { error } = await supabaseClient.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { name, phone }
+          }
+        });
+        if (error) throw error;
+        showAuthFeedback('Cuenta creada. Ya puedes iniciar sesión.', 'success');
+        setAuthMode('login');
+      } else {
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        showAuthFeedback('Sesión iniciada.', 'success');
+        closeAuthModal();
+        await refreshAuthUi();
+      }
+    } catch (error) {
+      console.error('❌ Error auth:', error);
+      showAuthFeedback(String(error?.message || 'No se pudo procesar la autenticación.'), 'error');
+    } finally {
+      appRuntime.authBusy = false;
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }, {}, 'auth:submit');
+
+  logListenerStats('auth');
+}
+
+
+function ensureSingleAuthSubscription() {
+  if (typeof appRuntime.authUnsubscribe === 'function') {
+    appRuntime.authUnsubscribe();
+    appRuntime.authUnsubscribe = null;
+  }
+
+  const { data } = supabaseClient.auth.onAuthStateChange(async (event, session) => {
+    const userId = session?.user?.id || null;
+
+    const isDuplicateSignedIn = event === 'SIGNED_IN'
+      && userId
+      && appRuntime.lastAuthUserId === userId
+      && ['SIGNED_IN', 'TOKEN_REFRESHED', 'INITIAL_SESSION'].includes(appRuntime.lastAuthEvent);
+
+    if (isDuplicateSignedIn) {
+      return;
+    }
+
+    if (event !== 'TOKEN_REFRESHED') {
+      console.log('🔐 onAuthStateChange recibido:', event);
+    }
+
+    if (event === 'TOKEN_REFRESHED') {
+      appRuntime.lastAuthEvent = event;
+      appRuntime.lastAuthUserId = userId;
+      await refreshAuthUi();
+      return;
+    }
+
+    appRuntime.lastAuthEvent = event;
+    appRuntime.lastAuthUserId = userId;
+
+    if (event === 'SIGNED_OUT') {
+      applyAuthUi(null);
+      closeAuthModal();
+      closeHistoryModal();
+      return;
+    }
+
+    await refreshAuthUi();
+  });
+
+  appRuntime.authSubscription = data?.subscription || null;
+  appRuntime.authUnsubscribe = () => {
+    data?.subscription?.unsubscribe?.();
+    appRuntime.authSubscription = null;
+  };
+
+  console.log('🧷 Auth subscription registrada (única)');
+}
+
+
+async function initApp() {
+  if (appRuntime.inited) return;
+  appRuntime.inited = true;
+  appRuntime.initCounter += 1;
+  console.log(`🚀 initApp corrida #${appRuntime.initCounter}`);
+
   loadCart();
+  resetGlobalEventWiring();
   setupCartModalEvents();
   setupTrackingEvents();
+  setupAuthEvents();
+  setupCheckoutSubmitDelegation();
   updateDireccionRequired();
   updateCartBadge();
   renderCartModal();
@@ -1566,7 +1999,15 @@ window.addEventListener('load', async () => {
   await getStoreSettings();
   await getDeliveryZones();
   await cargarMenu();
+  await refreshAuthUi();
+
+  ensureSingleAuthSubscription();
 
   const loader = document.getElementById('loader');
   if (loader) setTimeout(() => loader.classList.add('hide'), 1500);
-});
+}
+
+// ===============================
+// INIT
+// ===============================
+window.addEventListener('load', initApp);
