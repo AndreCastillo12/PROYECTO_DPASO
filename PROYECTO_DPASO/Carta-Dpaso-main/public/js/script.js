@@ -28,9 +28,11 @@ const appRuntime = window.__dpaso_runtime || {
   checkoutSubmitCounter: 0,
   authMode: 'login',
   authBusy: false,
-  authSubscription: null
+  authSubscription: null,
+  authUnsubscribe: null
 };
 window.__dpaso_runtime = appRuntime;
+if (typeof window.__dpasoSubmitting !== 'boolean') window.__dpasoSubmitting = false;
 
 const STATUS_ORDER = ['pending', 'accepted', 'preparing', 'ready', 'dispatched', 'delivered', 'completed', 'cancelled'];
 
@@ -1226,22 +1228,26 @@ function setupCartModalEvents() {
   });
 
   document.getElementById('download-receipt-btn')?.addEventListener('click', () => downloadReceiptPdf(lastOrderData));
-  document.getElementById('checkout-form')?.addEventListener('submit', submitOrder);
 }
 
 // ===============================
 // CHECKOUT + SUPABASE
 // ===============================
-async function submitOrder(event) {
-  event.preventDefault();
+async function submitOrder(eventOrForm) {
+  if (eventOrForm?.preventDefault) eventOrForm.preventDefault();
 
-  if (orderSubmitBusy) return;
+  if (orderSubmitBusy || window.__dpasoSubmitting) return;
+  window.__dpasoSubmitting = true;
 
   appRuntime.checkoutSubmitCounter += 1;
   console.log(`🧾 submitOrder intento #${appRuntime.checkoutSubmitCounter}`);
 
-  const form = event.currentTarget;
+  const form = eventOrForm?.currentTarget || eventOrForm;
   const submitBtn = document.getElementById('confirm-order-btn');
+  if (!form || !(form instanceof HTMLFormElement)) {
+    window.__dpasoSubmitting = false;
+    return;
+  }
   const whatsappBtn = document.getElementById('whatsapp-order-btn');
 
   if (whatsappBtn) {
@@ -1459,6 +1465,7 @@ async function submitOrder(event) {
     }
   } finally {
     orderSubmitBusy = false;
+    window.__dpasoSubmitting = false;
     submitBtn.disabled = false;
     submitBtn.textContent = 'Confirmar pedido';
     updateCartTotalsAndAvailability();
@@ -1571,6 +1578,23 @@ window.refreshMenu = async function () {
   await cargarMenu();
 };
 
+function setupCheckoutSubmitDelegation() {
+  if (document.body?.dataset.dpasoCheckoutSubmitBound === '1') return;
+  if (document.body) document.body.dataset.dpasoCheckoutSubmitBound = '1';
+
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const submitBtn = target.closest('[data-action="submit-order"]');
+    if (!submitBtn) return;
+
+    event.preventDefault();
+    const form = document.getElementById('checkout-form');
+    if (!form) return;
+    submitOrder(form);
+  });
+}
+
 function showAuthFeedback(message = '', type = 'info') {
   const feedback = document.getElementById('auth-feedback');
   if (!feedback) return;
@@ -1636,9 +1660,28 @@ async function loadOrderHistory() {
   }
 
   try {
-    const { data, error } = await supabaseClient.rpc('get_my_orders');
+    let data = null;
+    const { data: rpcData, error: rpcError } = await supabaseClient.rpc('get_my_orders');
 
-    if (error) throw error;
+    if (rpcError) {
+      const isMissingRpc = String(rpcError?.message || '').includes('get_my_orders')
+        || String(rpcError?.code || '') === 'PGRST202';
+
+      if (!isMissingRpc) throw rpcError;
+
+      console.warn('⚠️ get_my_orders no disponible, usando fallback por tabla orders');
+      const { data: fallbackData, error: fallbackError } = await supabaseClient
+        .from('orders')
+        .select('id,created_at,total,estado,short_code,modalidad')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (fallbackError) throw fallbackError;
+      data = fallbackData;
+    } else {
+      data = rpcData;
+    }
 
     if (!data || data.length === 0) {
       list.innerHTML = '<p class="tracking-muted">Aún no tienes pedidos.</p>';
@@ -1765,6 +1808,26 @@ function setupAuthEvents() {
   });
 }
 
+function ensureSingleAuthSubscription() {
+  if (appRuntime.authSubscription) return;
+
+  if (typeof appRuntime.authUnsubscribe === 'function') {
+    appRuntime.authUnsubscribe();
+    appRuntime.authUnsubscribe = null;
+  }
+
+  const { data } = supabaseClient.auth.onAuthStateChange(async () => {
+    console.log('🔐 onAuthStateChange recibido');
+    await refreshAuthUi();
+  });
+
+  appRuntime.authSubscription = data?.subscription || null;
+  appRuntime.authUnsubscribe = () => {
+    data?.subscription?.unsubscribe?.();
+    appRuntime.authSubscription = null;
+  };
+}
+
 async function initApp() {
   if (appRuntime.inited) return;
   appRuntime.inited = true;
@@ -1775,6 +1838,7 @@ async function initApp() {
   setupCartModalEvents();
   setupTrackingEvents();
   setupAuthEvents();
+  setupCheckoutSubmitDelegation();
   updateDireccionRequired();
   updateCartBadge();
   renderCartModal();
@@ -1784,13 +1848,7 @@ async function initApp() {
   await cargarMenu();
   await refreshAuthUi();
 
-  if (!appRuntime.authSubscription) {
-    const { data } = supabaseClient.auth.onAuthStateChange(async (_event, _session) => {
-      console.log('🔐 onAuthStateChange recibido');
-      await refreshAuthUi();
-    });
-    appRuntime.authSubscription = data?.subscription || null;
-  }
+  ensureSingleAuthSubscription();
 
   const loader = document.getElementById('loader');
   if (loader) setTimeout(() => loader.classList.add('hide'), 1500);
