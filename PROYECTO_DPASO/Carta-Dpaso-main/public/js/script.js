@@ -21,6 +21,8 @@ let platosState = new Map();
 let lastOrderCode = '';
 let trackingIntervalId = null;
 let trackingLastCode = '';
+let categoryObserver = null;
+let activeNavLockUntil = 0;
 
 const appRuntime = window.__dpaso_runtime || {
   inited: false,
@@ -40,6 +42,7 @@ if (!(appRuntime.boundActionKeys instanceof Set)) appRuntime.boundActionKeys = n
 if (!(appRuntime.scopeControllers instanceof Map)) appRuntime.scopeControllers = new Map();
 if (!('lastAuthUserId' in appRuntime)) appRuntime.lastAuthUserId = null;
 if (!('lastAuthEvent' in appRuntime)) appRuntime.lastAuthEvent = '';
+if (typeof appRuntime.profileSaveBusy !== 'boolean') appRuntime.profileSaveBusy = false;
 
 function resetGlobalEventWiring() {
   appRuntime.scopeControllers.forEach((controller) => controller.abort());
@@ -284,7 +287,7 @@ function clearFeedback() {
   feedback.className = 'checkout-feedback';
 }
 
-function showCartToast(message) {
+function showCartToast(message, durationMs = 2200) {
   const toast = document.getElementById('cart-toast');
   if (!toast) return;
 
@@ -295,7 +298,7 @@ function showCartToast(message) {
 
   cartToastTimer = setTimeout(() => {
     toast.classList.remove('show');
-  }, 1800);
+  }, durationMs);
 }
 
 function isPlatoSoldOut(plato) {
@@ -403,7 +406,7 @@ function openTrackingModal(prefillCode = '') {
 function closeTrackingModal() {
   const modal = document.getElementById('trackingModal');
   if (!modal) return;
-  closeModalSafe(modal, getFallbackFocusElement('tracking-float-btn', 'btnTracking', 'cart-float-btn'));
+  closeModalSafe(modal, getFallbackFocusElement('btnTrackingTop', 'btnTracking', 'cart-float-btn'));
   stopTrackingAutoRefresh();
 }
 
@@ -501,7 +504,7 @@ async function fetchOrderStatus(code, options = {}) {
 function setupTrackingEvents() {
   const scope = getOrCreateListenerScope('tracking');
   const openBtn = document.getElementById('btnTracking');
-  const floatBtn = document.getElementById('tracking-float-btn');
+  const topBtn = document.getElementById('btnTrackingTop');
   const closeBtn = document.getElementById('trackingCloseBtn');
   const searchBtn = document.getElementById('trackingSearchBtn');
   const refreshBtn = document.getElementById('trackingRefreshBtn');
@@ -514,9 +517,11 @@ function setupTrackingEvents() {
     openTrackingModal();
   }, {}, 'tracking:open-link');
 
-  bindScopedListener(scope, floatBtn, 'click', () => {
+  bindScopedListener(scope, topBtn, 'click', (event) => {
+    event.preventDefault();
     openTrackingModal();
-  }, {}, 'tracking:open-float');
+  }, {}, 'tracking:open-top');
+
 
   bindScopedListener(scope, closeBtn, 'click', closeTrackingModal, {}, 'tracking:close-btn');
 
@@ -542,10 +547,6 @@ function setupTrackingEvents() {
       fetchOrderStatus(input.value);
     }
   }, {}, 'tracking:enter-search');
-
-  bindScopedListener(scope, modal, 'click', (event) => {
-    if (event.target === modal) closeTrackingModal();
-  }, {}, 'tracking:backdrop-close');
 
   refreshTrackingLastButton();
 
@@ -1588,6 +1589,7 @@ async function submitOrder(eventOrForm) {
     saveLastTrackingCode(lastOrderCode);
 
     showFeedback(`✅ Pedido creado (#${lastOrderData.short_id}). Tu comprobante está listo.`, 'success');
+    showCartToast('Pedido enviado', 2400);
     renderReceipt(lastOrderData);
     closeCartModal();
     openReceiptModal();
@@ -1635,6 +1637,7 @@ async function submitOrder(eventOrForm) {
 async function cargarMenu() {
   const menu = document.getElementById('menu');
   const nav = document.querySelector('.nav');
+  const searchInput = document.getElementById('menu-search');
   if (!menu || !nav) return;
 
   try {
@@ -1654,78 +1657,312 @@ async function cargarMenu() {
 
     platosState = new Map((platosData || []).map((p) => [p.id, p]));
 
+    Array.from(document.querySelectorAll('.category-row')).forEach((row) => row.__destroyCarousel?.());
     menu.innerHTML = '';
     nav.innerHTML = '';
 
-    categoriasData.forEach(cat => {
-      const items = platosData.filter(p => p.categoria_id === cat.id);
+    const query = String(searchInput?.value || '').trim().toLowerCase();
+
+    categoriasData.forEach((cat) => {
+      const items = (platosData || []).filter((p) => p.categoria_id === cat.id)
+        .filter((p) => !query || String(p.nombre || '').toLowerCase().includes(query) || String(p.descripcion || '').toLowerCase().includes(query));
+
+      if (!items.length && query) return;
 
       const navLink = document.createElement('a');
       navLink.href = `#${cat.id}`;
       navLink.textContent = cat.nombre;
       nav.appendChild(navLink);
 
+      const sectionWrap = document.createElement('section');
+      sectionWrap.className = 'category-section fade-up';
+      sectionWrap.id = cat.id;
+
       const h2 = document.createElement('h2');
-      h2.className = 'section-title fade-up';
-      h2.id = cat.id;
+      h2.className = 'section-title';
       h2.textContent = cat.nombre;
-      menu.appendChild(h2);
+      sectionWrap.appendChild(h2);
 
-      if (items.length > 0) {
-        items.forEach(item => {
-          const div = document.createElement('div');
-          div.className = 'plato fade-up';
-          const soldOut = isPlatoSoldOut(item);
-          const stockText = soldOut ? '<span class="sold-out-badge">Agotado</span>' : '';
-
-          const imageUrl = item.imagen
-            ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
-            : 'images/Logos/logo.jpg';
-
-          div.innerHTML = `
-            <img src="${imageUrl}" alt="${item.nombre}">
-            <h3>${item.nombre}</h3>
-            <p>${item.descripcion || ''}</p>
-            <span>${formatCurrency(item.precio)}</span>
-            ${stockText}
-            <button type="button" class="add-cart-btn" ${soldOut ? 'disabled title="Producto agotado"' : ''}>Agregar al carrito</button>
-          `;
-
-          div.querySelector('.add-cart-btn')?.addEventListener('click', () => {
-            if (soldOut) return;
-            addToCart({
-              id: item.id,
-              nombre: item.nombre,
-              precio: item.precio,
-              imagen: imageUrl
-            });
-            showCartToast(`✅ ${item.nombre} agregado al carrito`);
-          });
-
-          menu.appendChild(div);
-        });
-      } else {
+      if (!items.length) {
         const emptyDiv = document.createElement('div');
-        emptyDiv.className = 'plato fade-up';
+        emptyDiv.className = 'plato';
         emptyDiv.innerHTML = '<p>No hay platos en esta categoría.</p>';
-        menu.appendChild(emptyDiv);
+        sectionWrap.appendChild(emptyDiv);
+        menu.appendChild(sectionWrap);
+        return;
       }
+
+      const row = document.createElement('div');
+      row.className = 'category-row';
+      row.innerHTML = `<div class="carousel-viewport"><div class="carousel-track"></div></div>`;
+
+      const track = row.querySelector('.carousel-track');
+
+      items.forEach((item) => {
+        const soldOut = isPlatoSoldOut(item);
+        const stockText = soldOut ? '<span class="sold-out-badge">Agotado</span>' : '';
+        const imageUrl = item.imagen
+          ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
+          : 'images/Logos/logo.jpg';
+
+        const card = document.createElement('article');
+        card.className = 'plato';
+        card.innerHTML = `
+          <img src="${imageUrl}" alt="${item.nombre}">
+          <h3>${item.nombre}</h3>
+          <p>${item.descripcion || ''}</p>
+          <span>${formatCurrency(item.precio)}</span>
+          ${stockText}
+          <button type="button" class="add-cart-btn" data-item-id="${item.id}" ${soldOut ? 'disabled title="Producto agotado"' : ''}>+ Agregar</button>
+        `;
+        track.appendChild(card);
+      });
+
+      track.addEventListener('click', (event) => {
+        const btn = event.target.closest('.add-cart-btn');
+        if (!btn) return;
+        const itemId = btn.dataset.itemId;
+        const item = items.find((it) => String(it.id) === String(itemId));
+        if (!item || isPlatoSoldOut(item)) return;
+
+        const imageUrl = item.imagen
+          ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
+          : 'images/Logos/logo.jpg';
+
+        addToCart({ id: item.id, nombre: item.nombre, precio: item.precio, imagen: imageUrl });
+        showCartToast(`✅ ${item.nombre} agregado al carrito`);
+      });
+
+      initInfiniteCarousel(row);
+      sectionWrap.appendChild(row);
+      menu.appendChild(sectionWrap);
     });
 
-    const observer = new IntersectionObserver(entries => {
-      entries.forEach(e => {
-        if (e.isIntersecting) {
-          e.target.classList.add('show');
-          observer.unobserve(e.target);
-        }
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('show');
+        observer.unobserve(e.target);
       });
     }, { threshold: 0.15 });
 
-    document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+    const renderedSections = menu.querySelectorAll('.category-section').length;
+    if (query && renderedSections === 0) {
+      menu.innerHTML = '<p style="padding:12px;color:#475569;">No encontramos platos para esa búsqueda.</p>';
+      nav.innerHTML = '';
+      return;
+    }
+
+    document.querySelectorAll('.fade-up').forEach((el) => observer.observe(el));
+    setupCategoryActiveNav();
+
+    if (searchInput && !searchInput.dataset.boundInput) {
+      searchInput.addEventListener('input', () => cargarMenu());
+      searchInput.dataset.boundInput = '1';
+    }
   } catch (err) {
     console.error('❌ Error cargando menú:', err);
     menu.innerHTML = '<p>Error cargando el menú. Revisa la consola.</p>';
   }
+}
+
+function setupCategoryActiveNav() {
+  if (categoryObserver) {
+    categoryObserver.disconnect();
+    categoryObserver = null;
+  }
+
+  const links = Array.from(document.querySelectorAll('.nav a'));
+  if (!links.length) return;
+
+  const linkMap = new Map();
+  links.forEach((link) => {
+    const id = String(link.getAttribute('href') || '').replace('#', '');
+    if (id) linkMap.set(id, link);
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      activeNavLockUntil = Date.now() + 1400;
+      links.forEach((l) => l.classList.remove('active-category'));
+      link.classList.add('active-category');
+
+      const target = document.getElementById(id);
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+
+  const sections = Array.from(document.querySelectorAll('.category-section'));
+  const io = new IntersectionObserver((entries) => {
+    if (Date.now() < activeNavLockUntil) return;
+    const visible = entries
+      .filter((e) => e.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+
+    if (!visible) return;
+    const id = visible.target.id;
+    if (!id) return;
+
+    links.forEach((l) => l.classList.remove('active-category'));
+    linkMap.get(id)?.classList.add('active-category');
+  }, {
+    root: null,
+    threshold: [0.25, 0.5, 0.75],
+    rootMargin: '-80px 0px -55% 0px'
+  });
+
+  sections.forEach((section) => io.observe(section));
+  links[0]?.classList.add('active-category');
+  categoryObserver = io;
+}
+
+function initInfiniteCarousel(row) {
+  const track = row.querySelector('.carousel-track');
+  const viewport = row.querySelector('.carousel-viewport');
+  if (!track || !viewport) return;
+
+  const originals = Array.from(track.children);
+  if (originals.length <= 1) return;
+
+  let baseWidth = 0;
+  let enabled = false;
+  let paused = false;
+  let dragging = false;
+  let moved = false;
+  let rafId = 0;
+  let lastTs = 0;
+  let resumeTimer = 0;
+  let visible = true;
+  const speedPxPerMs = 0.045;
+
+  let startX = 0;
+  let startY = 0;
+  let startScroll = 0;
+
+  const setPause = (value, withDelay = false) => {
+    if (resumeTimer) {
+      clearTimeout(resumeTimer);
+      resumeTimer = 0;
+    }
+
+    if (value) {
+      paused = true;
+      return;
+    }
+
+    if (!withDelay) {
+      paused = false;
+      return;
+    }
+
+    resumeTimer = window.setTimeout(() => {
+      paused = false;
+      resumeTimer = 0;
+    }, 550);
+  };
+
+  const resetToLoop = () => {
+    if (!enabled || baseWidth <= 0) return;
+    if (viewport.scrollLeft >= baseWidth) viewport.scrollLeft -= baseWidth;
+    if (viewport.scrollLeft < 0) viewport.scrollLeft += baseWidth;
+  };
+
+  const frame = (ts) => {
+    if (!lastTs) lastTs = ts;
+    const dt = ts - lastTs;
+    lastTs = ts;
+
+    if (enabled && visible && !paused && !dragging) {
+      viewport.scrollLeft += speedPxPerMs * dt;
+      resetToLoop();
+    }
+
+    rafId = requestAnimationFrame(frame);
+  };
+
+  const recalc = () => {
+    // cleanup duplicated children then re-clone if needed
+    while (track.children.length > originals.length) track.removeChild(track.lastChild);
+
+    const widths = originals.reduce((acc, node) => acc + node.getBoundingClientRect().width, 0);
+    baseWidth = widths + (originals.length - 1) * 14;
+
+    const hasOverflow = baseWidth > viewport.clientWidth + 6;
+    enabled = hasOverflow;
+
+    if (enabled) {
+      originals.forEach((node) => track.appendChild(node.cloneNode(true)));
+      if (viewport.scrollLeft >= baseWidth || viewport.scrollLeft <= 0) {
+        viewport.scrollLeft = Math.max(1, viewport.scrollLeft % baseWidth);
+      }
+    } else {
+      viewport.scrollLeft = 0;
+    }
+  };
+
+  const ro = new ResizeObserver(() => {
+    recalc();
+  });
+  ro.observe(viewport);
+
+  const io = new IntersectionObserver((entries) => {
+    visible = entries.some((e) => e.isIntersecting);
+  }, { threshold: 0.1 });
+  io.observe(row);
+
+  const dragThreshold = 10;
+
+  viewport.addEventListener('pointerdown', (event) => {
+    if (!enabled || event.button !== 0) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest('button, a, input, textarea, select, label')) return;
+    dragging = true;
+    moved = false;
+    setPause(true);
+    startX = event.clientX;
+    startY = event.clientY;
+    startScroll = viewport.scrollLeft;
+    viewport.setPointerCapture?.(event.pointerId);
+  });
+
+  viewport.addEventListener('pointermove', (event) => {
+    if (!dragging || !enabled) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (!moved && (Math.abs(dx) < dragThreshold || Math.abs(dx) <= Math.abs(dy))) return;
+
+    moved = true;
+    viewport.scrollLeft = startScroll - dx;
+    resetToLoop();
+  });
+
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    setPause(false, true);
+  };
+
+  viewport.addEventListener('pointerup', endDrag);
+  viewport.addEventListener('pointercancel', endDrag);
+  viewport.addEventListener('pointerleave', endDrag);
+
+  viewport.addEventListener('click', (event) => {
+    if (!moved) return;
+    event.preventDefault();
+    event.stopPropagation();
+    moved = false;
+  }, true);
+
+  row.addEventListener('mouseenter', () => setPause(true));
+  row.addEventListener('mouseleave', () => setPause(false, true));
+
+  recalc();
+  rafId = requestAnimationFrame(frame);
+
+  row.__destroyCarousel = () => {
+    if (resumeTimer) clearTimeout(resumeTimer);
+    cancelAnimationFrame(rafId);
+    ro.disconnect();
+    io.disconnect();
+  };
 }
 
 // ===============================
@@ -1766,27 +2003,147 @@ function showAuthFeedback(message = '', type = 'info') {
   feedback.className = `checkout-feedback ${type}`;
 }
 
+function showProfileFeedback(message = '', type = 'info') {
+  const feedback = document.getElementById('profile-feedback');
+  if (!feedback) return;
+  feedback.textContent = message;
+  feedback.className = `checkout-feedback ${type}`;
+}
+
+
+function normalizeEmail(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getFriendlyAuthError(error, context = 'login') {
+  const message = String(error?.message || '').toLowerCase();
+  const status = Number(error?.status || 0);
+
+  if (context === 'register') {
+    if (message.includes('user already registered') || message.includes('already registered') || message.includes('already exists')) {
+      return 'Este correo ya está registrado.';
+    }
+  }
+
+  if (context === 'login') {
+    if (message.includes('user not found') || message.includes('not found')) {
+      return 'No existe una cuenta con ese correo.';
+    }
+    if (status === 400 && message.includes('invalid login credentials')) {
+      return 'Contraseña incorrecta.';
+    }
+    if (message.includes('invalid password')) {
+      return 'Contraseña incorrecta.';
+    }
+    if (message.includes('email not confirmed')) {
+      return 'Debes confirmar tu correo antes de iniciar sesión.';
+    }
+  }
+
+  return String(error?.message || 'No se pudo procesar la autenticación.');
+}
+
+function setAuthEmailValue(email = '', { force = false } = {}) {
+  const normalizedEmail = normalizeEmail(email);
+  const loginEmailInput = document.getElementById('auth-email-login');
+  const registerEmailInput = document.getElementById('auth-email-register');
+
+  const assignValue = (input) => {
+    if (!input) return;
+    if (!force && input.dataset.userEdited === '1') return;
+    if (!force && document.activeElement === input) return;
+    if (!force && input.value.trim()) return;
+    input.value = normalizedEmail;
+  };
+
+  assignValue(loginEmailInput);
+  assignValue(registerEmailInput);
+}
+
+
+function withTimeout(promise, ms = 12000, timeoutMessage = 'Tiempo de espera agotado') {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function logSupabaseError(prefix, error) {
+  console.error(prefix, {
+    message: error?.message,
+    details: error?.details,
+    hint: error?.hint,
+    code: error?.code
+  });
+}
+
 function setAuthMode(mode = 'login') {
   const normalized = mode === 'register' ? 'register' : 'login';
   appRuntime.authMode = normalized;
-  const title = document.getElementById('auth-modal-title');
-  const submitBtn = document.getElementById('auth-submit-btn');
-  const toggleBtn = document.getElementById('auth-toggle-btn');
-  const nameInput = document.getElementById('auth-name');
-  const phoneInput = document.getElementById('auth-phone');
 
-  if (title) title.textContent = normalized === 'register' ? 'Crear cuenta' : 'Iniciar sesión';
-  if (submitBtn) submitBtn.textContent = normalized === 'register' ? 'Registrarme' : 'Entrar';
-  if (toggleBtn) toggleBtn.textContent = normalized === 'register' ? 'Ya tengo cuenta' : 'Crear cuenta';
-  if (nameInput) nameInput.required = normalized === 'register';
+  const title = document.getElementById('auth-modal-title');
+  const subtitle = document.getElementById('auth-modal-subtitle');
+  const submitBtn = document.getElementById('auth-submit-btn');
+  const tabLogin = document.getElementById('auth-tab-login');
+  const tabRegister = document.getElementById('auth-tab-register');
+  const forgotBtn = document.getElementById('auth-forgot-btn');
+  const registerNote = document.getElementById('auth-register-note');
+
+  const firstNameInput = document.getElementById('auth-first-name');
+  const lastNameInput = document.getElementById('auth-last-name');
+  const phoneInput = document.getElementById('auth-phone');
+  const dniInput = document.getElementById('auth-dni');
+  const confirmPasswordInput = document.getElementById('auth-confirm-password');
+  const loginPasswordInput = document.getElementById('auth-password-login');
+  const registerPasswordInput = document.getElementById('auth-password-register');
+  const loginEmailInput = document.getElementById('auth-email-login');
+  const registerEmailInput = document.getElementById('auth-email-register');
+
+  const registerFields = document.querySelectorAll('.auth-only-register');
+  const loginFields = document.querySelectorAll('.auth-only-login');
+
+  if (title) title.textContent = 'Mi cuenta';
+  if (subtitle) subtitle.textContent = 'Compra como invitado o ingresa para ver tu historial.';
+  if (submitBtn) submitBtn.textContent = normalized === 'register' ? 'Crear cuenta' : 'Ingresar';
+
+  if (tabLogin) tabLogin.classList.toggle('active', normalized === 'login');
+  if (tabRegister) tabRegister.classList.toggle('active', normalized === 'register');
+
+  registerFields.forEach((el) => el.classList.toggle('hidden', normalized !== 'register'));
+  loginFields.forEach((el) => el.classList.toggle('hidden', normalized !== 'login'));
+
+  if (firstNameInput) firstNameInput.required = normalized === 'register';
+  if (lastNameInput) lastNameInput.required = normalized === 'register';
   if (phoneInput) phoneInput.required = normalized === 'register';
+  if (dniInput) dniInput.required = normalized === 'register';
+  if (confirmPasswordInput) confirmPasswordInput.required = normalized === 'register';
+  if (loginEmailInput) loginEmailInput.required = normalized === 'login';
+  if (registerEmailInput) registerEmailInput.required = normalized === 'register';
+  if (loginPasswordInput) loginPasswordInput.required = normalized === 'login';
+  if (registerPasswordInput) registerPasswordInput.required = normalized === 'register';
+
+  if (loginPasswordInput) loginPasswordInput.setAttribute('autocomplete', 'current-password');
+  if (registerPasswordInput) registerPasswordInput.setAttribute('autocomplete', 'new-password');
+  if (confirmPasswordInput) confirmPasswordInput.setAttribute('autocomplete', normalized === 'register' ? 'new-password' : 'off');
+
+  if (normalized !== 'register' && confirmPasswordInput) confirmPasswordInput.value = '';
+
+  if (forgotBtn) forgotBtn.style.display = normalized === 'login' ? 'inline-block' : 'none';
+  if (registerNote) registerNote.style.display = normalized === 'register' ? 'block' : 'none';
+
   showAuthFeedback('');
 }
 
 function openAuthModal() {
   const modal = document.getElementById('auth-modal');
   if (!modal) return;
-  openModalSafe(modal, document.getElementById('auth-email'));
+  const emailFromSession = normalizeEmail(appRuntime.lastAuthEmail || '');
+  if (emailFromSession) setAuthEmailValue(emailFromSession);
+  const focusId = appRuntime.authMode === 'register' ? 'auth-first-name' : 'auth-email-login';
+  openModalSafe(modal, document.getElementById(focusId));
 }
 
 function closeAuthModal() {
@@ -1795,20 +2152,29 @@ function closeAuthModal() {
   closeModalSafe(modal, getFallbackFocusElement('auth-account-btn', 'cart-float-btn'));
 }
 
-function openHistoryModal() {
-  const modal = document.getElementById('history-modal');
+function openProfileModal() {
+  const modal = document.getElementById('profile-modal');
   if (!modal) return;
-  openModalSafe(modal, document.getElementById('history-close-btn'));
+  openModalSafe(modal, document.getElementById('profile-first-name'));
 }
 
-function closeHistoryModal() {
-  const modal = document.getElementById('history-modal');
+function closeProfileModal() {
+  const modal = document.getElementById('profile-modal');
   if (!modal) return;
-  closeModalSafe(modal, getFallbackFocusElement('auth-history-btn', 'auth-account-btn'));
+  closeModalSafe(modal, getFallbackFocusElement('auth-account-btn'));
 }
 
-async function loadOrderHistory() {
-  const list = document.getElementById('history-list');
+function closeAccountDropdownMenu() {
+  const dropdown = document.getElementById('auth-account-dropdown');
+  const accountBtn = document.getElementById('auth-account-btn');
+  if (!dropdown) return;
+  dropdown.classList.remove('open');
+  dropdown.setAttribute('aria-hidden', 'true');
+  accountBtn?.setAttribute('aria-expanded', 'false');
+}
+
+async function loadOrderHistory(targetId = 'profile-orders-list') {
+  const list = document.getElementById(targetId);
   if (!list) return;
   list.innerHTML = '<p class="tracking-muted">Cargando historial...</p>';
 
@@ -1829,7 +2195,6 @@ async function loadOrderHistory() {
 
       if (!isMissingRpc) throw rpcError;
 
-      console.warn('⚠️ get_my_orders no disponible, usando fallback por tabla orders');
       const { data: fallbackData, error: fallbackError } = await supabaseClient
         .from('orders')
         .select('id,created_at,total,estado,short_code,modalidad')
@@ -1857,25 +2222,64 @@ async function loadOrderHistory() {
     `).join('');
   } catch (error) {
     await reportCriticalError('history_error', 'loadOrderHistory', error);
-    console.error('❌ Error cargando historial:', error);
     list.innerHTML = '<p class="tracking-muted">No se pudo cargar el historial.</p>';
   }
 }
 
 function applyAuthUi(user = null) {
   const accountBtn = document.getElementById('auth-account-btn');
-  const historyBtn = document.getElementById('auth-history-btn');
   const checkoutName = document.getElementById('checkout-nombre');
   const checkoutPhone = document.getElementById('checkout-telefono');
 
-  if (accountBtn) accountBtn.textContent = user ? 'Cerrar sesión' : 'Iniciar sesión';
-  if (historyBtn) historyBtn.style.display = user ? 'inline-flex' : 'none';
+  if (accountBtn) accountBtn.textContent = user ? 'Mi cuenta' : 'Iniciar sesión / Registrarse';
+
+  appRuntime.lastAuthEmail = user?.email || '';
+
+  const profileEmail = document.getElementById('profile-email');
+  const profileEmailStatus = document.getElementById('profile-email-status');
 
   if (user) {
     const profileName = user.user_metadata?.name || '';
     const profilePhone = user.user_metadata?.phone || '';
+    if (profileEmail) profileEmail.value = user.email || '';
+    if (profileEmailStatus) {
+      profileEmailStatus.style.display = 'inline-flex';
+      profileEmailStatus.textContent = user.email_confirmed_at ? 'Correo verificado' : 'Correo pendiente';
+      profileEmailStatus.classList.toggle('pending', !user.email_confirmed_at);
+    }
     if (checkoutName && profileName) checkoutName.value = profileName;
     if (checkoutPhone && profilePhone) checkoutPhone.value = profilePhone;
+
+    const [first = '', ...rest] = String(profileName).split(' ');
+    const last = rest.join(' ');
+    const setVal = (id, value) => {
+      const node = document.getElementById(id);
+      if (node) node.value = value || '';
+    };
+    setVal('profile-first-name', user.user_metadata?.first_name || first);
+    setVal('profile-last-name', user.user_metadata?.last_name || last);
+    setVal('profile-phone', profilePhone);
+    setVal('profile-dni', user.user_metadata?.dni || '');
+
+    const avatarPreview = document.getElementById('profile-avatar-preview');
+    const avatarPath = user.user_metadata?.avatar_path;
+    if (avatarPreview && avatarPath) {
+      const { data } = supabaseClient.storage.from('avatars').getPublicUrl(avatarPath);
+      const avatarTs = Number(user.user_metadata?.avatar_updated_at || 0);
+      if (data?.publicUrl) {
+        const sep = data.publicUrl.includes('?') ? '&' : '?';
+        avatarPreview.src = `${data.publicUrl}${sep}t=${avatarTs || Date.now()}`;
+        avatarPreview.style.display = 'block';
+      }
+    }
+  } else {
+    if (profileEmail) profileEmail.value = '';
+    if (profileEmailStatus) profileEmailStatus.style.display = 'none';
+    const avatarPreview = document.getElementById('profile-avatar-preview');
+    if (avatarPreview) {
+      avatarPreview.removeAttribute('src');
+      avatarPreview.style.display = 'none';
+    }
   }
 }
 
@@ -1895,13 +2299,59 @@ function setupAuthEvents() {
   const scope = getOrCreateListenerScope('auth');
 
   const accountBtn = document.getElementById('auth-account-btn');
-  const historyBtn = document.getElementById('auth-history-btn');
-  const authModal = document.getElementById('auth-modal');
-  const historyModal = document.getElementById('history-modal');
   const closeBtn = document.getElementById('auth-close-btn');
-  const closeHistoryBtn = document.getElementById('history-close-btn');
-  const toggleBtn = document.getElementById('auth-toggle-btn');
+  const closeProfileBtn = document.getElementById('profile-close-btn');
+  const tabLogin = document.getElementById('auth-tab-login');
+  const tabRegister = document.getElementById('auth-tab-register');
+  const forgotBtn = document.getElementById('auth-forgot-btn');
+  const googleBtn = document.getElementById('auth-google-btn');
   const authForm = document.getElementById('auth-form');
+  const authEmailLoginInput = document.getElementById('auth-email-login');
+  const authEmailRegisterInput = document.getElementById('auth-email-register');
+  const accountDropdown = document.getElementById('auth-account-dropdown');
+  const accountOpenProfile = document.getElementById('account-open-profile');
+  const accountOpenPassword = document.getElementById('account-open-password');
+  const accountOpenOrders = document.getElementById('account-open-orders');
+  const accountLogoutBtn = document.getElementById('account-logout-btn');
+  const passwordModal = document.getElementById('password-modal');
+  const passwordCloseBtn = document.getElementById('password-close-btn');
+  const passwordForm = document.getElementById('password-form');
+  const ordersModal = document.getElementById('orders-modal');
+  const ordersCloseBtn = document.getElementById('orders-close-btn');
+
+  const markEmailEdited = (input) => { if (input) input.dataset.userEdited = '1'; };
+  bindScopedListener(scope, authEmailLoginInput, 'input', () => markEmailEdited(authEmailLoginInput), {}, 'auth:email-login-edited');
+  bindScopedListener(scope, authEmailRegisterInput, 'input', () => markEmailEdited(authEmailRegisterInput), {}, 'auth:email-register-edited');
+
+
+  function openAccountDropdown() {
+    if (!accountDropdown) return;
+    accountDropdown.classList.add('open');
+    accountDropdown.setAttribute('aria-hidden', 'false');
+    accountBtn?.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeAccountDropdown() {
+    closeAccountDropdownMenu();
+  }
+
+  function openPasswordModal() {
+    closeAccountDropdown();
+    openModalSafe(passwordModal, document.getElementById('password-email'));
+  }
+
+  function closePasswordModal() {
+    closeModalSafe(passwordModal, getFallbackFocusElement('auth-account-btn'));
+  }
+
+  function openOrdersModal() {
+    closeAccountDropdown();
+    openModalSafe(ordersModal, ordersCloseBtn);
+  }
+
+  function closeOrdersModal() {
+    closeModalSafe(ordersModal, getFallbackFocusElement('auth-account-btn'));
+  }
 
   bindScopedListener(scope, accountBtn, 'click', async () => {
     const { data } = await supabaseClient.auth.getSession();
@@ -1911,55 +2361,123 @@ function setupAuthEvents() {
       openAuthModal();
       return;
     }
+    if (accountDropdown?.classList.contains('open')) {
+      closeAccountDropdownMenu();
+    } else {
+      openAccountDropdown();
+    }
+  }, {}, 'auth:account-btn');
 
-    if (accountBtn) accountBtn.disabled = true;
 
+
+  bindScopedListener(scope, accountOpenProfile, 'click', () => {
+    closeAccountDropdown();
+    openProfileModal();
+  }, {}, 'auth:menu-profile');
+  bindScopedListener(scope, accountOpenPassword, 'click', openPasswordModal, {}, 'auth:menu-password');
+  bindScopedListener(scope, accountOpenOrders, 'click', async () => {
+    openOrdersModal();
+    await loadOrderHistory('profile-orders-list');
+  }, {}, 'auth:menu-orders');
+
+  bindScopedListener(scope, accountLogoutBtn, 'click', async () => {
+    closeAccountDropdown();
     try {
       const { error } = await supabaseClient.auth.signOut({ scope: 'local' });
       if (error) throw error;
       appRuntime.lastAuthEvent = 'SIGNED_OUT';
       appRuntime.lastAuthUserId = null;
       applyAuthUi(null);
+      showCartToast('Sesión cerrada', 2400);
+      closeAccountDropdownMenu();
       closeAuthModal();
-      closeHistoryModal();
+      closeProfileModal();
+      closePasswordModal();
+      closeOrdersModal();
     } catch (error) {
-      await reportCriticalError('auth_error', 'setupAuthEvents:signOut', error);
-      console.error('❌ Error cerrando sesión:', error);
-      await refreshAuthUi();
-    } finally {
-      if (accountBtn) accountBtn.disabled = false;
+      showAuthFeedback(String(error?.message || 'No se pudo cerrar sesión.'), 'error');
     }
-  }, {}, 'auth:account-btn');
+  }, {}, 'auth:menu-logout');
 
-  bindScopedListener(scope, historyBtn, 'click', async () => {
-    openHistoryModal();
-    await loadOrderHistory();
-  }, {}, 'auth:history-open');
+  bindScopedListener(scope, passwordCloseBtn, 'click', closePasswordModal, {}, 'auth:password-close');
+  bindScopedListener(scope, ordersCloseBtn, 'click', closeOrdersModal, {}, 'auth:orders-close');
 
-  bindScopedListener(scope, toggleBtn, 'click', () => {
-    setAuthMode(appRuntime.authMode === 'login' ? 'register' : 'login');
-  }, {}, 'auth:toggle-mode');
+
+  bindScopedListener(scope, document, 'click', (event) => {
+    if (!accountDropdown?.classList.contains('open')) return;
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (accountDropdown.contains(target) || accountBtn?.contains(target)) return;
+    closeAccountDropdown();
+  }, {}, 'auth:dropdown-outside');
+
+  bindScopedListener(scope, document, 'keydown', (event) => {
+    if (event.key === 'Escape' && accountDropdown?.classList.contains('open')) {
+      closeAccountDropdownMenu();
+      accountBtn?.focus();
+    }
+  }, {}, 'auth:dropdown-esc');
+
+  bindScopedListener(scope, passwordForm, 'submit', async (event) => {
+    event.preventDefault();
+    const email = String(document.getElementById('password-email')?.value || '').trim();
+    const feedback = document.getElementById('password-feedback');
+    if (!email) return;
+    try {
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + window.location.pathname
+      });
+      if (error) throw error;
+      if (feedback) {
+        feedback.textContent = 'Te enviamos un enlace para cambiar tu contraseña.';
+        feedback.className = 'checkout-feedback success';
+      }
+    } catch (error) {
+      if (feedback) {
+        feedback.textContent = String(error?.message || 'No se pudo enviar el correo.');
+        feedback.className = 'checkout-feedback error';
+      }
+    }
+  }, {}, 'auth:password-submit');
+
+  bindScopedListener(scope, tabLogin, 'click', () => setAuthMode('login'), {}, 'auth:tab-login');
+  bindScopedListener(scope, tabRegister, 'click', () => setAuthMode('register'), {}, 'auth:tab-register');
+
+  bindScopedListener(scope, forgotBtn, 'click', (event) => {
+    event.preventDefault();
+    showAuthFeedback('Escríbenos por WhatsApp para ayudarte con tu acceso.', 'info');
+  }, {}, 'auth:forgot');
+
+  bindScopedListener(scope, googleBtn, 'click', async () => {
+    try {
+      showAuthFeedback('Redirigiendo a Google...', 'info');
+      const { error } = await supabaseClient.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin + window.location.pathname
+        }
+      });
+      if (error) throw error;
+    } catch (error) {
+      showAuthFeedback(String(error?.message || 'No se pudo iniciar con Google.'), 'error');
+    }
+  }, {}, 'auth:google');
 
   bindScopedListener(scope, closeBtn, 'click', closeAuthModal, {}, 'auth:close-modal');
-  bindScopedListener(scope, closeHistoryBtn, 'click', closeHistoryModal, {}, 'auth:close-history');
-
-  bindScopedListener(scope, authModal, 'click', (event) => {
-    if (event.target === authModal) closeAuthModal();
-  }, {}, 'auth:backdrop-close');
-
-  bindScopedListener(scope, historyModal, 'click', (event) => {
-    if (event.target === historyModal) closeHistoryModal();
-  }, {}, 'auth:history-backdrop-close');
+  bindScopedListener(scope, closeProfileBtn, 'click', closeProfileModal, {}, 'auth:close-profile');
 
   bindScopedListener(scope, authForm, 'submit', async (event) => {
     event.preventDefault();
     if (appRuntime.authBusy) return;
 
     const submitBtn = document.getElementById('auth-submit-btn');
-    const name = String(document.getElementById('auth-name')?.value || '').trim();
+    const firstName = String(document.getElementById('auth-first-name')?.value || '').trim();
+    const lastName = String(document.getElementById('auth-last-name')?.value || '').trim();
     const phone = String(document.getElementById('auth-phone')?.value || '').replace(/\D+/g, '');
-    const email = String(document.getElementById('auth-email')?.value || '').trim();
-    const password = String(document.getElementById('auth-password')?.value || '');
+    const dni = String(document.getElementById('auth-dni')?.value || '').replace(/\D+/g, '');
+    const email = String(document.getElementById(appRuntime.authMode === 'register' ? 'auth-email-register' : 'auth-email-login')?.value || '').trim();
+    const password = String(document.getElementById(appRuntime.authMode === 'register' ? 'auth-password-register' : 'auth-password-login')?.value || '');
+    const confirmPassword = String(document.getElementById('auth-confirm-password')?.value || '');
 
     try {
       appRuntime.authBusy = true;
@@ -1967,20 +2485,37 @@ function setupAuthEvents() {
       showAuthFeedback('Procesando...', 'info');
 
       if (appRuntime.authMode === 'register') {
+        if (phone.length !== 9) throw new Error('El teléfono debe tener 9 dígitos.');
+        if (dni.length !== 8) throw new Error('El DNI debe tener 8 dígitos.');
+        if (password.length < 8) throw new Error('La contraseña debe tener mínimo 8 caracteres.');
+        if (!/[A-Z]/.test(password)) throw new Error('La contraseña debe incluir al menos 1 mayúscula.');
+        if (!/[a-z]/.test(password)) throw new Error('La contraseña debe incluir al menos 1 minúscula.');
+        if (!/[0-9]/.test(password)) throw new Error('La contraseña debe incluir al menos 1 número.');
+        if (!/[\W_]/.test(password)) throw new Error('La contraseña debe incluir al menos 1 carácter especial.');
+        if (password !== confirmPassword) throw new Error('Las contraseñas no coinciden.');
+
+        const fullName = `${firstName} ${lastName}`.trim();
         const { error } = await supabaseClient.auth.signUp({
           email,
           password,
           options: {
-            data: { name, phone }
+            data: {
+              name: fullName,
+              first_name: firstName,
+              last_name: lastName,
+              phone,
+              dni
+            }
           }
         });
-        if (error) throw error;
-        showAuthFeedback('Cuenta creada. Ya puedes iniciar sesión.', 'success');
+        if (error) throw new Error(getFriendlyAuthError(error, 'register'));
+        showAuthFeedback('Cuenta creada. Revisa tu correo para confirmar y luego inicia sesión.', 'success');
         setAuthMode('login');
       } else {
         const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        if (error) throw new Error(getFriendlyAuthError(error, 'login'));
         showAuthFeedback('Sesión iniciada.', 'success');
+        showCartToast('Sesión iniciada', 2400);
         closeAuthModal();
         await refreshAuthUi();
       }
@@ -1994,6 +2529,134 @@ function setupAuthEvents() {
     }
   }, {}, 'auth:submit');
 
+
+  bindScopedListener(scope, document.getElementById('profile-avatar'), 'change', (event) => {
+    const input = event.currentTarget;
+    const file = input?.files?.[0];
+    const avatarPreview = document.getElementById('profile-avatar-preview');
+    if (!avatarPreview || !file) return;
+    const tempUrl = URL.createObjectURL(file);
+    avatarPreview.src = tempUrl;
+    avatarPreview.style.display = 'block';
+    avatarPreview.dataset.tempPreview = tempUrl;
+  }, {}, 'auth:avatar-preview-change');
+
+
+  bindScopedListener(scope, document.getElementById('profile-form'), 'submit', async (event) => {
+    event.preventDefault();
+    if (appRuntime.profileSaveBusy) return;
+
+    const saveBtn = document.getElementById('profile-save-btn');
+    const { data: sessionData } = await supabaseClient.auth.getSession();
+    const user = sessionData?.session?.user;
+    if (!user) {
+      showProfileFeedback('Inicia sesión para actualizar tu perfil.', 'error');
+      return;
+    }
+
+    const first_name = String(document.getElementById('profile-first-name')?.value || '').trim();
+    const last_name = String(document.getElementById('profile-last-name')?.value || '').trim();
+    const phone = String(document.getElementById('profile-phone')?.value || '').replace(/\D+/g, '');
+    const dni = String(document.getElementById('profile-dni')?.value || '').replace(/\D+/g, '');
+    const avatarInput = document.getElementById('profile-avatar');
+
+    appRuntime.profileSaveBusy = true;
+    if (saveBtn) saveBtn.disabled = true;
+    const previousText = saveBtn?.textContent || 'Guardar perfil';
+    if (saveBtn) saveBtn.textContent = 'Guardando...';
+
+    try {
+      showProfileFeedback('Guardando perfil...', 'info');
+
+      let avatar_path = user.user_metadata?.avatar_path || '';
+      let avatar_updated_at = Number(user.user_metadata?.avatar_updated_at || 0);
+      const file = avatarInput?.files?.[0];
+      if (file) {
+        const ext = file.name.split('.').pop() || 'jpg';
+        avatar_path = `${user.id}/avatar-${Date.now()}.${ext}`;
+        const uploadResult = await withTimeout(
+          supabaseClient.storage.from('avatars').upload(avatar_path, file, { upsert: true }),
+          15000,
+          'La subida de la imagen tardó demasiado.'
+        );
+        const upErr = uploadResult?.error;
+        if (upErr) {
+          logSupabaseError('⚠️ Error subiendo avatar (continuamos sin bloquear perfil):', upErr);
+          avatar_path = user.user_metadata?.avatar_path || '';
+        } else {
+          avatar_updated_at = Date.now();
+        }
+      }
+
+      const payload = {
+        name: `${first_name} ${last_name}`.trim(),
+        first_name,
+        last_name,
+        phone,
+        dni,
+        avatar_path,
+        avatar_updated_at
+      };
+
+      const updateResult = await withTimeout(
+        supabaseClient.auth.updateUser({ data: payload }),
+        12000,
+        'La actualización del perfil tardó demasiado.'
+      );
+      const error = updateResult?.error;
+      if (error) throw error;
+
+      const customerPayload = {
+        name: `${first_name} ${last_name}`.trim(),
+        phone,
+        dni,
+        email: user.email || ''
+      };
+
+      try {
+        await withTimeout(
+          supabaseClient
+            .from('customers')
+            .update(customerPayload)
+            .or(`user_id.eq.${user.id},auth_user_id.eq.${user.id}`),
+          9000,
+          'La actualización de customers tardó demasiado.'
+        );
+      } catch (customersError) {
+        logSupabaseError('⚠️ No se pudo sincronizar customers (no bloqueante):', customersError);
+      }
+
+      showProfileFeedback('Perfil actualizado correctamente.', 'success');
+      showCartToast('Perfil actualizado', 2400);
+
+      const avatarPreview = document.getElementById('profile-avatar-preview');
+      if (avatarPreview && avatar_path) {
+        const { data } = supabaseClient.storage.from('avatars').getPublicUrl(avatar_path);
+        if (data?.publicUrl) {
+          const sep = data.publicUrl.includes('?') ? '&' : '?';
+          avatarPreview.src = `${data.publicUrl}${sep}t=${avatar_updated_at || Date.now()}`;
+          avatarPreview.style.display = 'block';
+        }
+        if (avatarPreview.dataset.tempPreview) {
+          URL.revokeObjectURL(avatarPreview.dataset.tempPreview);
+          delete avatarPreview.dataset.tempPreview;
+        }
+      }
+
+      await refreshAuthUi();
+    } catch (error) {
+      logSupabaseError('❌ Error guardando perfil cliente:', error);
+      showProfileFeedback('No se pudo guardar, intenta otra vez.', 'error');
+    } finally {
+      appRuntime.profileSaveBusy = false;
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = previousText;
+      }
+    }
+  }, {}, 'auth:profile-save');
+
+  setAuthMode('login');
   logListenerStats('auth');
 }
 
@@ -2033,7 +2696,8 @@ function ensureSingleAuthSubscription() {
     if (event === 'SIGNED_OUT') {
       applyAuthUi(null);
       closeAuthModal();
-      closeHistoryModal();
+      closeProfileModal();
+      closeAccountDropdownMenu();
       return;
     }
 
