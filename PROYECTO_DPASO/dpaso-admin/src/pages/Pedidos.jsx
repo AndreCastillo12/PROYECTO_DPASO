@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
+import { logCriticalEvent } from "../lib/observability";
 
 const ORDER_STATUS = ["pending", "accepted", "preparing", "ready", "dispatched", "delivered", "completed", "cancelled"];
 const PAYMENT_METHODS = ["cash", "yape", "plin", "card", "transfer", "other"];
@@ -121,6 +122,7 @@ export default function Pedidos() {
         .limit(30);
 
       if (error) {
+        await logCriticalEvent("admin_orders_error", "Pedidos:loadOrders", error);
         console.error("Error cargando pedidos:", {
           message: error.message,
           details: error.details,
@@ -163,6 +165,7 @@ export default function Pedidos() {
         .order("created_at", { ascending: true });
 
       if (error) {
+        await logCriticalEvent("admin_orders_error", "Pedidos:loadOrderItems", error, { orderId });
         console.error("Error cargando items de pedido:", {
           message: error.message,
           details: error.details,
@@ -270,6 +273,7 @@ export default function Pedidos() {
       .eq("id", orderId);
 
     if (error) {
+      await logCriticalEvent("admin_orders_error", "Pedidos:updateStatus", error, { orderId, newStatus });
       console.error("Error actualizando estado:", {
         message: error.message,
         details: error.details,
@@ -326,6 +330,7 @@ export default function Pedidos() {
       .eq("id", selectedOrder.id);
 
     if (error) {
+      await logCriticalEvent("admin_orders_error", "Pedidos:updatePayment", error, { orderId, method });
       console.error("Error actualizando pago:", error);
       const handled = await handleAuthError(error);
       if (!handled) showToast("No se pudo actualizar pago", "error");
