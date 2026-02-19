@@ -68,7 +68,7 @@ export default function Dashboard() {
         .order("created_at", { ascending: false }),
       supabase
         .from("orders")
-        .select("id,total,estado,nombre_cliente,created_at")
+        .select("id,total,estado,nombre_cliente,created_at,short_code,modalidad,payment_method,paid")
         .order("created_at", { ascending: false })
         .limit(recentLimit),
       supabase
@@ -136,6 +136,23 @@ export default function Dashboard() {
     if (summary.activeOrders > 10) return `Hay ${summary.activeOrders} pedidos activos. Revisa cola de cocina y despacho.`;
     return "Operación estable: sin alertas críticas por el momento.";
   }, [didLoad, summary.activeOrders, summary.ordersToday]);
+
+  const topSalesChart = useMemo(() => {
+    const last = salesTrend.slice(-12);
+    return last.map(([day, total]) => {
+      const numericTotal = Number(total || 0);
+      return {
+        day,
+        label: new Date(`${day}T00:00:00`).toLocaleDateString("es-PE", { day: "2-digit", month: "short" }),
+        sales: numericTotal,
+      };
+    });
+  }, [salesTrend]);
+
+  const chartMax = useMemo(() => {
+    if (!topSalesChart.length) return 1;
+    return Math.max(...topSalesChart.map((item) => item.sales), 1);
+  }, [topSalesChart]);
 
   return (
     <div style={pageWrap}>
@@ -240,18 +257,43 @@ export default function Dashboard() {
 
       <section style={cardStyle}>
         <div style={sectionHeader}>
-          <h3 style={sectionTitle}>Tendencia de ventas</h3>
+          <h3 style={sectionTitle}>Top ventas</h3>
           <Link to="/reportes" style={ghostBtn}>Abrir reportes</Link>
         </div>
-        {salesTrend.length === 0 ? (
+        {topSalesChart.length === 0 ? (
           <p style={emptyText}>Sin datos de tendencia.</p>
         ) : (
-          salesTrend.map(([day, total]) => (
-            <div key={day} style={rowStyle}>
-              <span>{day}</span>
-              <strong>{currency(total)}</strong>
+          <>
+            <div style={chartWrap}>
+              {topSalesChart.map((item) => (
+                <div key={item.day} style={chartCol}>
+                  <div style={chartSlot}>
+                    <div style={{ ...chartBar, height: `${(item.sales / chartMax) * 100}%` }} />
+                  </div>
+                  <small style={chartLabel}>{item.label}</small>
+                </div>
+              ))}
             </div>
-          ))
+
+            <div style={{ overflowX: "auto", marginTop: 12 }}>
+              <table style={ordersTable}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Fecha</th>
+                    <th style={thStyle}>Total ventas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topSalesChart.map((row) => (
+                    <tr key={`trend-${row.day}`}>
+                      <td style={tdStyle}>{row.day}</td>
+                      <td style={tdStyle}>{currency(row.sales)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
 
@@ -263,12 +305,34 @@ export default function Dashboard() {
         {latestOrders.length === 0 ? (
           <p style={emptyText}>No hay pedidos registrados.</p>
         ) : (
-          latestOrders.slice(0, 6).map((order) => (
-            <div key={order.id} style={rowStyle}>
-              <span>{order.nombre_cliente || "Cliente"}</span>
-              <strong>{currency(order.total)}</strong>
-            </div>
-          ))
+          <div style={{ overflowX: "auto" }}>
+            <table style={ordersTable}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Código</th>
+                  <th style={thStyle}>Cliente</th>
+                  <th style={thStyle}>Fecha</th>
+                  <th style={thStyle}>Estado</th>
+                  <th style={thStyle}>Modalidad</th>
+                  <th style={thStyle}>Pago</th>
+                  <th style={thStyle}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {latestOrders.slice(0, 10).map((order) => (
+                  <tr key={order.id}>
+                    <td style={tdStyle}><strong>{order.short_code || String(order.id).slice(-8).toUpperCase()}</strong></td>
+                    <td style={tdStyle}>{order.nombre_cliente || "Cliente"}</td>
+                    <td style={tdStyle}>{new Date(order.created_at).toLocaleString()}</td>
+                    <td style={tdStyle}>{humanStatus(order.estado)}</td>
+                    <td style={tdStyle}>{order.modalidad || "-"}</td>
+                    <td style={tdStyle}>{order.paid ? (order.payment_method || "Pagado") : "-"}</td>
+                    <td style={tdStyle}>{currency(order.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>
@@ -299,15 +363,15 @@ const heroCard = {
 
 const heroTitle = {
   margin: 0,
-  fontSize: 48,
-  lineHeight: 1,
+  fontSize: 34,
+  lineHeight: 1.05,
   color: "#0f1f4a",
 };
 
 const heroSubtitle = {
   margin: "8px 0 0",
   color: "#2f4069",
-  fontSize: 28,
+  fontSize: 16,
 };
 
 const primaryBtn = {
@@ -330,7 +394,7 @@ const fieldLabel = {
   display: "block",
   marginBottom: 8,
   color: "#374151",
-  fontSize: 15,
+  fontSize: 14,
 };
 
 const selectStyle = {
@@ -338,13 +402,14 @@ const selectStyle = {
   border: "1px solid #cbd5e1",
   borderRadius: 12,
   padding: "10px 12px",
-  fontSize: 16,
+  fontSize: 14,
   background: "#fff",
 };
 
 const hintCard = {
   ...cardStyle,
   color: "#4b638b",
+  fontSize: 14,
 };
 
 const kpiGrid = {
@@ -357,20 +422,20 @@ const kpiCard = {
   borderRadius: 18,
   padding: 18,
   color: "#fff",
-  minHeight: 150,
+  minHeight: 120,
   display: "flex",
   flexDirection: "column",
-  gap: 8,
+  gap: 6,
 };
 
 const kpiLabel = {
-  fontSize: 20,
+  fontSize: 16,
   opacity: 0.95,
 };
 
 const kpiValue = {
-  fontSize: 54,
-  lineHeight: 1,
+  fontSize: 34,
+  lineHeight: 1.05,
 };
 
 const sectionHeader = {
@@ -384,7 +449,7 @@ const sectionHeader = {
 const sectionTitle = {
   margin: 0,
   color: "#0f172a",
-  fontSize: 40,
+  fontSize: 28,
 };
 
 const ghostBtn = {
@@ -395,7 +460,7 @@ const ghostBtn = {
   padding: "8px 12px",
   background: "#f8fafc",
   fontWeight: 600,
-  fontSize: 14,
+  fontSize: 13,
 };
 
 const alertBox = {
@@ -404,7 +469,7 @@ const alertBox = {
   borderRadius: 12,
   padding: "12px 14px",
   color: "#41537a",
-  fontSize: 16,
+  fontSize: 14,
 };
 
 const doubleGrid = {
@@ -420,10 +485,68 @@ const rowStyle = {
   padding: "10px 0",
   borderBottom: "1px solid #f1f5f9",
   color: "#334155",
+  fontSize: 14,
 };
 
 const emptyText = {
   color: "#64748b",
   margin: 0,
-  fontSize: 17,
+  fontSize: 14,
+};
+
+const chartWrap = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(44px, 1fr))",
+  gap: 8,
+  alignItems: "end",
+};
+
+const chartCol = {
+  display: "grid",
+  gap: 6,
+  justifyItems: "center",
+};
+
+const chartSlot = {
+  height: 170,
+  width: "100%",
+  minWidth: 38,
+  borderRadius: 10,
+  background: "#f8fafc",
+  position: "relative",
+  display: "flex",
+  alignItems: "end",
+  padding: "0 6px",
+};
+
+const chartBar = {
+  width: "100%",
+  borderRadius: "8px 8px 0 0",
+  background: "linear-gradient(180deg, #24c6b0, #1ea6bf)",
+};
+
+const chartLabel = {
+  color: "#64748b",
+  fontSize: 12,
+};
+
+const ordersTable = {
+  width: "100%",
+  borderCollapse: "collapse",
+  minWidth: 780,
+};
+
+const thStyle = {
+  textAlign: "left",
+  fontSize: 13,
+  color: "#475569",
+  borderBottom: "1px solid #e5e7eb",
+  padding: "8px 6px",
+};
+
+const tdStyle = {
+  fontSize: 14,
+  color: "#0f172a",
+  borderBottom: "1px solid #f1f5f9",
+  padding: "9px 6px",
 };
