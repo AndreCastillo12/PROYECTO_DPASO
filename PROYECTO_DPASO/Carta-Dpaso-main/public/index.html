@@ -141,25 +141,32 @@
 
 <div id="cart-toast" class="cart-toast" aria-live="polite"></div>
 
-<header class="header">
+<header class="header app-header">
+  <button class="menu-trigger" type="button" aria-label="Menú">☰</button>
   <img src="images/Logos/logo.jpg" class="logo" alt="Logo DPASO">
   <div class="header-text">
-    <h1>CARTA DPASO</h1>
-    <p>Cocina Libre · Pescados & Mariscos</p>
+    <h1>DPASO</h1>
+    <p>Cocina Libre</p>
   </div>
-  <div class="header-account">
+
+  <div class="header-search-wrap">
+    <input id="menu-search" class="header-search" type="search" placeholder="Buscar platos...">
+  </div>
+
+  <div class="header-actions">
+    <button id="btnTrackingTop" class="top-pill-btn" type="button">🛵 Rastrear</button>
     <button id="auth-account-btn" class="auth-account-btn" type="button">Iniciar sesión</button>
     <button id="auth-history-btn" class="auth-history-btn" type="button" style="display:none;">Mis pedidos</button>
   </div>
 </header>
 
-<nav class="nav">
-  <a href="#picar">Pa’ Picar</a>
-  <a href="#comer">Pa’ Comer</a>
-  <a href="#combos">Combos</a>
-  <a href="#calientes">Calientes</a>
-  <a href="#bebidas">Bebidas</a>
-</nav>
+<section class="hero-banner">
+  <p class="hero-overline">CARTA ONLINE</p>
+  <h2>Sabores marinos y criollos con estilo DPASO</h2>
+  <p>Elige por categoría, agrega al carrito y confirma tu pedido en minutos.</p>
+</section>
+
+<nav class="nav"></nav>
 
 <section class="menu" id="menu"></section>
 
@@ -200,21 +207,60 @@
 </div>
 
 <div id="auth-modal" class="tracking-modal" aria-hidden="true">
-  <div class="tracking-modal-card auth-modal-card">
-    <h3 id="auth-modal-title">Iniciar sesión</h3>
-    <p class="tracking-muted">Guarda tu sesión y revisa tu historial.</p>
-    <form id="auth-form" class="auth-form">
-      <input id="auth-name" type="text" placeholder="Nombre (solo registro)">
-      <input id="auth-phone" type="tel" placeholder="Teléfono (9 dígitos)" inputmode="numeric" pattern="[0-9]{9}" maxlength="9">
-      <input id="auth-email" type="email" placeholder="Correo electrónico" required>
-      <input id="auth-password" type="password" placeholder="Contraseña" minlength="6" required>
-      <p id="auth-feedback" class="checkout-feedback"></p>
-      <div class="tracking-row">
-        <button id="auth-submit-btn" class="tracking-btn tracking-primary" type="submit">Entrar</button>
-        <button id="auth-toggle-btn" class="tracking-btn tracking-ghost" type="button">Crear cuenta</button>
+  <div class="tracking-modal-card auth-modal-card auth-modal-shell">
+    <section class="auth-side-visual">
+      <div class="auth-side-overlay">
+        <p class="auth-side-overline">DPASO · COCINA LIBRE</p>
+        <h3>Bienvenido</h3>
+        <p>Accede para ver tus pedidos, actualizar tu perfil y comprar más rápido.</p>
       </div>
-      <button id="auth-close-btn" class="tracking-btn tracking-danger tracking-full" type="button">Cerrar</button>
-    </form>
+    </section>
+
+    <section class="auth-side-form">
+      <button id="auth-close-btn" class="auth-close-icon" type="button" aria-label="Cerrar">×</button>
+      <h3 id="auth-modal-title">Mi cuenta</h3>
+      <p id="auth-modal-subtitle" class="tracking-muted">Compra como invitado o ingresa para ver tu historial.</p>
+
+      <div class="auth-tabs">
+        <button id="auth-tab-login" class="auth-tab-btn active" type="button">Iniciar sesión</button>
+        <button id="auth-tab-register" class="auth-tab-btn" type="button">Crear cuenta</button>
+      </div>
+
+      <form id="auth-form" class="auth-form">
+        <div class="auth-only-register">
+          <label for="auth-first-name">Nombres</label>
+          <input id="auth-first-name" type="text" placeholder="Nombres">
+        </div>
+
+        <div class="auth-only-register">
+          <label for="auth-last-name">Apellidos</label>
+          <input id="auth-last-name" type="text" placeholder="Apellidos">
+        </div>
+
+        <div class="auth-only-register">
+          <label for="auth-phone">Teléfono</label>
+          <input id="auth-phone" type="tel" placeholder="Teléfono (9 dígitos)" inputmode="numeric" pattern="[0-9]{9}" maxlength="9">
+        </div>
+
+        <div class="auth-only-register">
+          <label for="auth-dni">DNI</label>
+          <input id="auth-dni" type="text" placeholder="DNI (8 dígitos)" inputmode="numeric" pattern="[0-9]{8}" maxlength="8">
+        </div>
+
+        <label for="auth-email">Correo</label>
+        <input id="auth-email" type="email" placeholder="Correo" required>
+
+        <label for="auth-password">Contraseña</label>
+        <input id="auth-password" type="password" placeholder="Contraseña" minlength="6" required>
+
+        <button id="auth-submit-btn" class="tracking-btn tracking-primary tracking-full" type="submit">Ingresar</button>
+        <a id="auth-forgot-btn" href="#" class="auth-forgot-link">¿Olvidaste tu contraseña?</a>
+        <button id="auth-google-btn" class="tracking-btn tracking-ghost tracking-full" type="button">Ingresar con Google</button>
+
+        <p id="auth-register-note" class="tracking-muted" style="display:none;">Si no te llega el correo, revisa spam/promociones. Puedes seguir comprando como invitado.</p>
+        <p id="auth-feedback" class="checkout-feedback"></p>
+      </form>
+    </section>
   </div>
 </div>
 

@@ -501,6 +501,7 @@ async function fetchOrderStatus(code, options = {}) {
 function setupTrackingEvents() {
   const scope = getOrCreateListenerScope('tracking');
   const openBtn = document.getElementById('btnTracking');
+  const topBtn = document.getElementById('btnTrackingTop');
   const floatBtn = document.getElementById('tracking-float-btn');
   const closeBtn = document.getElementById('trackingCloseBtn');
   const searchBtn = document.getElementById('trackingSearchBtn');
@@ -513,6 +514,11 @@ function setupTrackingEvents() {
     event.preventDefault();
     openTrackingModal();
   }, {}, 'tracking:open-link');
+
+  bindScopedListener(scope, topBtn, 'click', (event) => {
+    event.preventDefault();
+    openTrackingModal();
+  }, {}, 'tracking:open-top');
 
   bindScopedListener(scope, floatBtn, 'click', () => {
     openTrackingModal();
@@ -1635,6 +1641,7 @@ async function submitOrder(eventOrForm) {
 async function cargarMenu() {
   const menu = document.getElementById('menu');
   const nav = document.querySelector('.nav');
+  const searchInput = document.getElementById('menu-search');
   if (!menu || !nav) return;
 
   try {
@@ -1657,75 +1664,217 @@ async function cargarMenu() {
     menu.innerHTML = '';
     nav.innerHTML = '';
 
-    categoriasData.forEach(cat => {
-      const items = platosData.filter(p => p.categoria_id === cat.id);
+    const query = String(searchInput?.value || '').trim().toLowerCase();
+
+    categoriasData.forEach((cat) => {
+      const items = (platosData || []).filter((p) => p.categoria_id === cat.id)
+        .filter((p) => !query || String(p.nombre || '').toLowerCase().includes(query) || String(p.descripcion || '').toLowerCase().includes(query));
 
       const navLink = document.createElement('a');
       navLink.href = `#${cat.id}`;
       navLink.textContent = cat.nombre;
       nav.appendChild(navLink);
 
+      const sectionWrap = document.createElement('section');
+      sectionWrap.className = 'category-section fade-up';
+      sectionWrap.id = cat.id;
+
       const h2 = document.createElement('h2');
-      h2.className = 'section-title fade-up';
-      h2.id = cat.id;
+      h2.className = 'section-title';
       h2.textContent = cat.nombre;
-      menu.appendChild(h2);
+      sectionWrap.appendChild(h2);
 
-      if (items.length > 0) {
-        items.forEach(item => {
-          const div = document.createElement('div');
-          div.className = 'plato fade-up';
-          const soldOut = isPlatoSoldOut(item);
-          const stockText = soldOut ? '<span class="sold-out-badge">Agotado</span>' : '';
-
-          const imageUrl = item.imagen
-            ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
-            : 'images/Logos/logo.jpg';
-
-          div.innerHTML = `
-            <img src="${imageUrl}" alt="${item.nombre}">
-            <h3>${item.nombre}</h3>
-            <p>${item.descripcion || ''}</p>
-            <span>${formatCurrency(item.precio)}</span>
-            ${stockText}
-            <button type="button" class="add-cart-btn" ${soldOut ? 'disabled title="Producto agotado"' : ''}>Agregar al carrito</button>
-          `;
-
-          div.querySelector('.add-cart-btn')?.addEventListener('click', () => {
-            if (soldOut) return;
-            addToCart({
-              id: item.id,
-              nombre: item.nombre,
-              precio: item.precio,
-              imagen: imageUrl
-            });
-            showCartToast(`✅ ${item.nombre} agregado al carrito`);
-          });
-
-          menu.appendChild(div);
-        });
-      } else {
+      if (!items.length) {
         const emptyDiv = document.createElement('div');
-        emptyDiv.className = 'plato fade-up';
+        emptyDiv.className = 'plato';
         emptyDiv.innerHTML = '<p>No hay platos en esta categoría.</p>';
-        menu.appendChild(emptyDiv);
+        sectionWrap.appendChild(emptyDiv);
+        menu.appendChild(sectionWrap);
+        return;
       }
+
+      const row = document.createElement('div');
+      row.className = 'category-row';
+      row.innerHTML = `
+        <button type="button" class="carousel-arrow" data-action="prev">‹</button>
+        <div class="carousel-viewport"><div class="carousel-track"></div></div>
+        <button type="button" class="carousel-arrow" data-action="next">›</button>
+      `;
+
+      const track = row.querySelector('.carousel-track');
+
+      items.forEach((item) => {
+        const soldOut = isPlatoSoldOut(item);
+        const stockText = soldOut ? '<span class="sold-out-badge">Agotado</span>' : '';
+        const imageUrl = item.imagen
+          ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
+          : 'images/Logos/logo.jpg';
+
+        const card = document.createElement('article');
+        card.className = 'plato';
+        card.innerHTML = `
+          <img src="${imageUrl}" alt="${item.nombre}">
+          <h3>${item.nombre}</h3>
+          <p>${item.descripcion || ''}</p>
+          <span>${formatCurrency(item.precio)}</span>
+          ${stockText}
+          <button type="button" class="add-cart-btn" data-item-id="${item.id}" ${soldOut ? 'disabled title="Producto agotado"' : ''}>+ Agregar</button>
+        `;
+        track.appendChild(card);
+      });
+
+      track.addEventListener('click', (event) => {
+        const btn = event.target.closest('.add-cart-btn');
+        if (!btn) return;
+        const itemId = btn.dataset.itemId;
+        const item = items.find((it) => String(it.id) === String(itemId));
+        if (!item || isPlatoSoldOut(item)) return;
+
+        const imageUrl = item.imagen
+          ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
+          : 'images/Logos/logo.jpg';
+
+        addToCart({ id: item.id, nombre: item.nombre, precio: item.precio, imagen: imageUrl });
+        showCartToast(`✅ ${item.nombre} agregado al carrito`);
+      });
+
+      initInfiniteCarousel(row);
+      sectionWrap.appendChild(row);
+      menu.appendChild(sectionWrap);
     });
 
-    const observer = new IntersectionObserver(entries => {
-      entries.forEach(e => {
-        if (e.isIntersecting) {
-          e.target.classList.add('show');
-          observer.unobserve(e.target);
-        }
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('show');
+        observer.unobserve(e.target);
       });
     }, { threshold: 0.15 });
 
-    document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+    document.querySelectorAll('.fade-up').forEach((el) => observer.observe(el));
+    setupCategoryActiveNav();
+
+    if (searchInput && !searchInput.dataset.boundInput) {
+      searchInput.addEventListener('input', () => cargarMenu());
+      searchInput.dataset.boundInput = '1';
+    }
   } catch (err) {
     console.error('❌ Error cargando menú:', err);
     menu.innerHTML = '<p>Error cargando el menú. Revisa la consola.</p>';
   }
+}
+
+function setupCategoryActiveNav() {
+  const links = Array.from(document.querySelectorAll('.nav a'));
+  if (!links.length) return;
+
+  const linkMap = new Map();
+  links.forEach((link) => {
+    const id = String(link.getAttribute('href') || '').replace('#', '');
+    if (id) linkMap.set(id, link);
+    link.addEventListener('click', () => {
+      links.forEach((l) => l.classList.remove('active-category'));
+      link.classList.add('active-category');
+    });
+  });
+
+  const sections = Array.from(document.querySelectorAll('.category-section'));
+  const io = new IntersectionObserver((entries) => {
+    const visible = entries
+      .filter((e) => e.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+
+    if (!visible) return;
+    const id = visible.target.id;
+    if (!id) return;
+
+    links.forEach((l) => l.classList.remove('active-category'));
+    linkMap.get(id)?.classList.add('active-category');
+  }, {
+    root: null,
+    threshold: [0.25, 0.5, 0.75],
+    rootMargin: '-80px 0px -55% 0px'
+  });
+
+  sections.forEach((section) => io.observe(section));
+  links[0]?.classList.add('active-category');
+}
+
+function initInfiniteCarousel(row) {
+  const track = row.querySelector('.carousel-track');
+  const prev = row.querySelector('[data-action="prev"]');
+  const next = row.querySelector('[data-action="next"]');
+  if (!track || !prev || !next) return;
+
+  const originals = Array.from(track.children);
+  if (originals.length <= 1) return;
+
+  const clone = originals.map((node) => node.cloneNode(true));
+  clone.forEach((node) => track.appendChild(node));
+
+  let offset = 0;
+  let paused = false;
+  let rafId = null;
+  let lastTs = 0;
+
+  function singleSetWidth() {
+    return Array.from(track.children)
+      .slice(0, originals.length)
+      .reduce((acc, node) => acc + node.getBoundingClientRect().width, 0)
+      + (originals.length - 1) * 14;
+  }
+
+  function applyTransform() {
+    track.style.transform = `translate3d(${-offset}px,0,0)`;
+  }
+
+  function tick(ts) {
+    if (!lastTs) lastTs = ts;
+    const dt = ts - lastTs;
+    lastTs = ts;
+
+    if (!paused) {
+      offset += dt * 0.05;
+      const width = singleSetWidth();
+      if (offset >= width) offset -= width;
+      applyTransform();
+    }
+
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function jumpBy(direction = 1) {
+    const first = track.children[0];
+    if (!first) return;
+    const cardStep = first.getBoundingClientRect().width + 14;
+    offset += direction * cardStep;
+
+    const width = singleSetWidth();
+    if (offset < 0) offset += width;
+    if (offset >= width) offset -= width;
+    applyTransform();
+  }
+
+  prev.addEventListener('click', () => jumpBy(-1));
+  next.addEventListener('click', () => jumpBy(1));
+
+  row.addEventListener('mouseenter', () => { paused = true; });
+  row.addEventListener('mouseleave', () => { paused = false; });
+  row.addEventListener('touchstart', () => { paused = true; }, { passive: true });
+  row.addEventListener('touchend', () => { paused = false; }, { passive: true });
+
+  window.addEventListener('resize', () => {
+    const width = singleSetWidth();
+    if (offset >= width) offset = offset % width;
+    applyTransform();
+  });
+
+  applyTransform();
+  rafId = requestAnimationFrame(tick);
+
+  row.__destroyCarousel = () => {
+    if (rafId) cancelAnimationFrame(rafId);
+  };
 }
 
 // ===============================
@@ -1769,24 +1918,47 @@ function showAuthFeedback(message = '', type = 'info') {
 function setAuthMode(mode = 'login') {
   const normalized = mode === 'register' ? 'register' : 'login';
   appRuntime.authMode = normalized;
-  const title = document.getElementById('auth-modal-title');
-  const submitBtn = document.getElementById('auth-submit-btn');
-  const toggleBtn = document.getElementById('auth-toggle-btn');
-  const nameInput = document.getElementById('auth-name');
-  const phoneInput = document.getElementById('auth-phone');
 
-  if (title) title.textContent = normalized === 'register' ? 'Crear cuenta' : 'Iniciar sesión';
-  if (submitBtn) submitBtn.textContent = normalized === 'register' ? 'Registrarme' : 'Entrar';
-  if (toggleBtn) toggleBtn.textContent = normalized === 'register' ? 'Ya tengo cuenta' : 'Crear cuenta';
-  if (nameInput) nameInput.required = normalized === 'register';
+  const title = document.getElementById('auth-modal-title');
+  const subtitle = document.getElementById('auth-modal-subtitle');
+  const submitBtn = document.getElementById('auth-submit-btn');
+  const tabLogin = document.getElementById('auth-tab-login');
+  const tabRegister = document.getElementById('auth-tab-register');
+  const forgotBtn = document.getElementById('auth-forgot-btn');
+  const registerNote = document.getElementById('auth-register-note');
+
+  const firstNameInput = document.getElementById('auth-first-name');
+  const lastNameInput = document.getElementById('auth-last-name');
+  const phoneInput = document.getElementById('auth-phone');
+  const dniInput = document.getElementById('auth-dni');
+
+  const registerFields = document.querySelectorAll('.auth-only-register');
+
+  if (title) title.textContent = 'Mi cuenta';
+  if (subtitle) subtitle.textContent = 'Compra como invitado o ingresa para ver tu historial.';
+  if (submitBtn) submitBtn.textContent = normalized === 'register' ? 'Crear cuenta' : 'Ingresar';
+
+  if (tabLogin) tabLogin.classList.toggle('active', normalized === 'login');
+  if (tabRegister) tabRegister.classList.toggle('active', normalized === 'register');
+
+  registerFields.forEach((el) => el.classList.toggle('hidden', normalized !== 'register'));
+
+  if (firstNameInput) firstNameInput.required = normalized === 'register';
+  if (lastNameInput) lastNameInput.required = normalized === 'register';
   if (phoneInput) phoneInput.required = normalized === 'register';
+  if (dniInput) dniInput.required = normalized === 'register';
+
+  if (forgotBtn) forgotBtn.style.display = normalized === 'login' ? 'inline-block' : 'none';
+  if (registerNote) registerNote.style.display = normalized === 'register' ? 'block' : 'none';
+
   showAuthFeedback('');
 }
 
 function openAuthModal() {
   const modal = document.getElementById('auth-modal');
   if (!modal) return;
-  openModalSafe(modal, document.getElementById('auth-email'));
+  const focusId = appRuntime.authMode === 'register' ? 'auth-first-name' : 'auth-email';
+  openModalSafe(modal, document.getElementById(focusId));
 }
 
 function closeAuthModal() {
@@ -1900,7 +2072,10 @@ function setupAuthEvents() {
   const historyModal = document.getElementById('history-modal');
   const closeBtn = document.getElementById('auth-close-btn');
   const closeHistoryBtn = document.getElementById('history-close-btn');
-  const toggleBtn = document.getElementById('auth-toggle-btn');
+  const tabLogin = document.getElementById('auth-tab-login');
+  const tabRegister = document.getElementById('auth-tab-register');
+  const forgotBtn = document.getElementById('auth-forgot-btn');
+  const googleBtn = document.getElementById('auth-google-btn');
   const authForm = document.getElementById('auth-form');
 
   bindScopedListener(scope, accountBtn, 'click', async () => {
@@ -1936,9 +2111,17 @@ function setupAuthEvents() {
     await loadOrderHistory();
   }, {}, 'auth:history-open');
 
-  bindScopedListener(scope, toggleBtn, 'click', () => {
-    setAuthMode(appRuntime.authMode === 'login' ? 'register' : 'login');
-  }, {}, 'auth:toggle-mode');
+  bindScopedListener(scope, tabLogin, 'click', () => setAuthMode('login'), {}, 'auth:tab-login');
+  bindScopedListener(scope, tabRegister, 'click', () => setAuthMode('register'), {}, 'auth:tab-register');
+
+  bindScopedListener(scope, forgotBtn, 'click', (event) => {
+    event.preventDefault();
+    showAuthFeedback('Escríbenos por WhatsApp para ayudarte con tu acceso.', 'info');
+  }, {}, 'auth:forgot');
+
+  bindScopedListener(scope, googleBtn, 'click', () => {
+    showAuthFeedback('Ingreso con Google disponible próximamente.', 'info');
+  }, {}, 'auth:google');
 
   bindScopedListener(scope, closeBtn, 'click', closeAuthModal, {}, 'auth:close-modal');
   bindScopedListener(scope, closeHistoryBtn, 'click', closeHistoryModal, {}, 'auth:close-history');
@@ -1956,8 +2139,10 @@ function setupAuthEvents() {
     if (appRuntime.authBusy) return;
 
     const submitBtn = document.getElementById('auth-submit-btn');
-    const name = String(document.getElementById('auth-name')?.value || '').trim();
+    const firstName = String(document.getElementById('auth-first-name')?.value || '').trim();
+    const lastName = String(document.getElementById('auth-last-name')?.value || '').trim();
     const phone = String(document.getElementById('auth-phone')?.value || '').replace(/\D+/g, '');
+    const dni = String(document.getElementById('auth-dni')?.value || '').replace(/\D+/g, '');
     const email = String(document.getElementById('auth-email')?.value || '').trim();
     const password = String(document.getElementById('auth-password')?.value || '');
 
@@ -1967,15 +2152,25 @@ function setupAuthEvents() {
       showAuthFeedback('Procesando...', 'info');
 
       if (appRuntime.authMode === 'register') {
+        if (phone.length !== 9) throw new Error('El teléfono debe tener 9 dígitos.');
+        if (dni.length !== 8) throw new Error('El DNI debe tener 8 dígitos.');
+
+        const fullName = `${firstName} ${lastName}`.trim();
         const { error } = await supabaseClient.auth.signUp({
           email,
           password,
           options: {
-            data: { name, phone }
+            data: {
+              name: fullName,
+              first_name: firstName,
+              last_name: lastName,
+              phone,
+              dni
+            }
           }
         });
         if (error) throw error;
-        showAuthFeedback('Cuenta creada. Ya puedes iniciar sesión.', 'success');
+        showAuthFeedback('Cuenta creada. Revisa tu correo para confirmar y luego inicia sesión.', 'success');
         setAuthMode('login');
       } else {
         const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
@@ -1994,6 +2189,7 @@ function setupAuthEvents() {
     }
   }, {}, 'auth:submit');
 
+  setAuthMode('login');
   logListenerStats('auth');
 }
 
