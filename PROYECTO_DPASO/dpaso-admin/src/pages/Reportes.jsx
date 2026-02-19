@@ -29,6 +29,7 @@ export default function Reportes() {
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
   const [kpis, setKpis] = useState({ totalSales: 0, totalOrders: 0, ticketPromedio: 0, cancelPct: 0 });
+  const [opMetrics, setOpMetrics] = useState({ conversion_rate: 0, dropped_orders: 0, avg_rpc_ms: 0 });
 
   const [dateFrom, setDateFrom] = useState(toDateInput(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)));
   const [dateTo, setDateTo] = useState(toDateInput(new Date()));
@@ -73,6 +74,20 @@ export default function Reportes() {
         totalOrders,
         ticketPromedio: totalOrders ? totalSales / Math.max(nonCancelled.length, 1) : 0,
         cancelPct: totalOrders ? (cancelledCount * 100) / totalOrders : 0,
+      });
+    }
+
+
+    const { data: opData, error: opError } = await supabase.rpc("rpc_operational_metrics", {
+      date_from: fromIso,
+      date_to: toIso,
+    });
+
+    if (!opError && opData) {
+      setOpMetrics({
+        conversion_rate: Number(opData.conversion_rate || 0),
+        dropped_orders: Number(opData.dropped_orders || 0),
+        avg_rpc_ms: Number(opData.avg_rpc_ms || 0),
       });
     }
 
@@ -123,6 +138,12 @@ export default function Reportes() {
         <article style={kpiCard}><span>Pedidos</span><strong>{kpis.totalOrders}</strong></article>
         <article style={kpiCard}><span>Ticket promedio</span><strong>{money(kpis.ticketPromedio)}</strong></article>
         <article style={kpiCard}><span>% cancelados</span><strong>{kpis.cancelPct.toFixed(2)}%</strong></article>
+      </section>
+
+      <section style={kpiGrid}>
+        <article style={kpiCard}><span>Conversión operativa</span><strong>{opMetrics.conversion_rate.toFixed(2)}%</strong></article>
+        <article style={kpiCard}><span>Pedidos caídos</span><strong>{opMetrics.dropped_orders}</strong></article>
+        <article style={kpiCard}><span>RPC promedio checkout</span><strong>{opMetrics.avg_rpc_ms.toFixed(0)} ms</strong></article>
       </section>
 
       <section style={cardStyle}>

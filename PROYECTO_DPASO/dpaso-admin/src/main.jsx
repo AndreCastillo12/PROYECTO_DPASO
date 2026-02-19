@@ -11,6 +11,7 @@ import Tienda from "./pages/Tienda";
 import ZonasDelivery from "./pages/ZonasDelivery";
 import Caja from "./pages/Caja";
 import Reportes from "./pages/Reportes";
+import Dashboard from "./pages/Dashboard";
 import Clientes from "./pages/Clientes";
 import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
@@ -28,7 +29,7 @@ const router = createBrowserRouter([
       </ProtectedRoute>
     ),
     children: [
-      { index: true, element: <Platos /> },   // / -> platos
+      { index: true, element: <Dashboard /> },   // / -> dashboard
       { path: "platos", element: <Platos /> }, // /platos
       { path: "categorias", element: <Categorias /> }, // /categorias
       { path: "perfil", element: <Perfil /> }, // /perfil
@@ -36,6 +37,7 @@ const router = createBrowserRouter([
       { path: "tienda", element: <Tienda /> }, // /tienda
       { path: "zonas-delivery", element: <ZonasDelivery /> }, // /zonas-delivery
       { path: "caja", element: <Caja /> }, // /caja
+      { path: "dashboard", element: <Dashboard /> }, // /dashboard
       { path: "reportes", element: <Reportes /> }, // /reportes
       { path: "clientes", element: <Clientes /> }, // /clientes
     ],

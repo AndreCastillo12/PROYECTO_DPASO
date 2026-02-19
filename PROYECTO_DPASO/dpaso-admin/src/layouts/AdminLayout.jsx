@@ -106,6 +106,7 @@ export default function AdminLayout() {
             <h2 style={{ textAlign: "center", margin: "12px 0 4px" }}>Admin</h2>
             {displayName && <span style={userNameStyle}>{displayName}</span>}
           </div>
+          <NavLink to="/dashboard" style={linkStyle}>Dashboard</NavLink>
           <NavLink to="/platos" style={linkStyle}>Gestión de Platos</NavLink>
           <NavLink to="/categorias" style={linkStyle}>Gestión de Categorías</NavLink>
           <NavLink to="/pedidos" style={linkStyle}>Pedidos</NavLink>
@@ -166,6 +167,9 @@ export default function AdminLayout() {
                 <span style={userNameStyle}>{displayName || "Usuario"}</span>
               </div>
             </div>
+            <NavLink to="/dashboard" style={linkStyle} onClick={() => setMenuOpen(false)}>
+              Dashboard
+            </NavLink>
             <NavLink to="/platos" style={linkStyle} onClick={() => setMenuOpen(false)}>
               Gestión de Platos
             </NavLink>
