@@ -4,6 +4,8 @@ import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import { logCriticalEvent } from "../lib/observability";
+import useAdminPreferences from "../hooks/useAdminPreferences";
+import { OPERATION_MESSAGES, resolveErrorMessage } from "../utils/operationMessages";
 
 const ORDER_STATUS = ["pending", "accepted", "preparing", "ready", "dispatched", "delivered", "completed", "cancelled"];
 const PAYMENT_METHODS = ["cash", "yape", "plin", "card", "transfer", "other"];
@@ -92,9 +94,19 @@ export default function Pedidos() {
 
   const [busyOrderId, setBusyOrderId] = useState(null);
 
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [preferences, setPreferences] = useAdminPreferences("dpaso_admin_pedidos_filters", {
+    statusFilter: "all",
+    search: "",
+    autoRefresh: false,
+    dateFrom: "",
+    dateTo: "",
+    sortBy: "newest",
+  });
+  const { statusFilter, search, autoRefresh, dateFrom, dateTo, sortBy } = preferences;
+
+  const updatePreference = useCallback((field, value) => {
+    setPreferences((prev) => ({ ...prev, [field]: value }));
+  }, [setPreferences]);
 
   const { toast, showToast } = useToast(2600);
   const navigate = useNavigate();
@@ -103,7 +115,7 @@ export default function Pedidos() {
   const handleAuthError = useCallback(
     async (error) => {
       if (!isAuthError(error)) return false;
-      showToast("No autorizado. Inicia sesión nuevamente.", "error");
+      showToast(OPERATION_MESSAGES.authError, "error");
       await supabase.auth.signOut();
       navigate("/login", { replace: true });
       return true;
@@ -132,12 +144,12 @@ export default function Pedidos() {
 
         const handled = await handleAuthError(error);
         if (!handled && notifyOnError) {
-          showToast("No se pudo cargar pedidos", "error");
+          showToast(OPERATION_MESSAGES.loadError, "error");
         }
 
-        setOrdersError("No se pudo cargar pedidos.");
+        setOrdersError(OPERATION_MESSAGES.loadError);
         setLoading(false);
-        return;
+        return false;
       }
 
       const rows = data || [];
@@ -149,6 +161,7 @@ export default function Pedidos() {
       });
 
       setLoading(false);
+      return true;
     },
     [handleAuthError, showToast]
   );
@@ -176,10 +189,10 @@ export default function Pedidos() {
 
         const handled = await handleAuthError(error);
         if (!handled && notifyOnError) {
-          showToast("No se pudo cargar el detalle del pedido", "error");
+          showToast(OPERATION_MESSAGES.loadError, "error");
         }
 
-        setDetailError("No se pudo cargar los items del pedido.");
+        setDetailError(OPERATION_MESSAGES.loadError);
         setOrderItems([]);
         setDetailLoading(false);
         return;
@@ -248,18 +261,34 @@ export default function Pedidos() {
   const filteredOrders = useMemo(() => {
     const term = search.trim().toLowerCase();
 
-    return orders.filter((order) => {
+    const scoped = orders.filter((order) => {
       const byStatus = statusFilter === "all" || order.estado === statusFilter;
       if (!byStatus) return false;
-      if (!term) return true;
 
+      const createdAt = order.created_at ? new Date(order.created_at) : null;
+      if (dateFrom) {
+        const start = new Date(`${dateFrom}T00:00:00`);
+        if (!createdAt || createdAt < start) return false;
+      }
+      if (dateTo) {
+        const end = new Date(`${dateTo}T23:59:59`);
+        if (!createdAt || createdAt > end) return false;
+      }
+
+      if (!term) return true;
       const customerName = String(order.nombre_cliente || "").toLowerCase();
       const customerPhone = String(order.telefono || "").toLowerCase();
       const clientCode = getClientCode(order).toLowerCase();
       const internalCode = shortOrderId(order.id).toLowerCase();
       return customerName.includes(term) || customerPhone.includes(term) || clientCode.includes(term) || internalCode.includes(term);
     });
-  }, [orders, search, statusFilter]);
+
+    return scoped.sort((a, b) => {
+      if (sortBy === "oldest") return new Date(a.created_at) - new Date(b.created_at);
+      if (sortBy === "total_desc") return Number(b.total || 0) - Number(a.total || 0);
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
+  }, [orders, search, statusFilter, dateFrom, dateTo, sortBy]);
 
   const onChangeStatus = async (newStatus) => {
     if (!selectedOrder?.id || !ORDER_STATUS.includes(newStatus)) return;
@@ -284,7 +313,7 @@ export default function Pedidos() {
       });
 
       const handled = await handleAuthError(error);
-      if (!handled) showToast("No se pudo actualizar el estado", "error");
+      if (!handled) showToast(OPERATION_MESSAGES.saveError, "error");
       setBusyOrderId(null);
       return;
     }
@@ -292,7 +321,7 @@ export default function Pedidos() {
     setOrders((prev) => prev.map((item) => (item.id === orderId ? { ...item, estado: newStatus } : item)));
     setSelectedOrder((prev) => (prev?.id === orderId ? { ...prev, estado: newStatus } : prev));
 
-    showToast("Estado actualizado ✅", "success");
+    showToast(OPERATION_MESSAGES.saveSuccess, "success");
     setBusyOrderId(null);
   };
 
@@ -307,12 +336,12 @@ export default function Pedidos() {
     const computedChange = method === "cash" && isPaid ? received - total : 0;
 
     if (isPaid && !method) {
-      showToast("Selecciona método de pago", "error");
+      showToast(resolveErrorMessage(null, "Selecciona un método de pago."), "error");
       return;
     }
 
     if (isPaid && method === "cash" && received < total) {
-      showToast("El monto recibido no puede ser menor al total", "error");
+      showToast(resolveErrorMessage(null, "El monto recibido no puede ser menor al total."), "error");
       return;
     }
 
@@ -333,7 +362,7 @@ export default function Pedidos() {
       await logCriticalEvent("admin_orders_error", "Pedidos:updatePayment", error, { orderId, method });
       console.error("Error actualizando pago:", error);
       const handled = await handleAuthError(error);
-      if (!handled) showToast("No se pudo actualizar pago", "error");
+      if (!handled) showToast(OPERATION_MESSAGES.saveError, "error");
       setBusyOrderId(null);
       return;
     }
@@ -360,7 +389,7 @@ export default function Pedidos() {
       cash_change: isPaid && method === "cash" ? computedChange : null,
     }) : prev);
 
-    showToast("Pago actualizado ✅", "success");
+    showToast(OPERATION_MESSAGES.saveSuccess, "success");
     setBusyOrderId(null);
   };
 
@@ -369,7 +398,7 @@ export default function Pedidos() {
 
     const waPhone = normalizePhoneForWa(selectedOrder.telefono);
     if (!waPhone) {
-      showToast("No hay teléfono válido para WhatsApp", "error");
+      showToast(resolveErrorMessage(null, "No hay teléfono válido para WhatsApp."), "error");
       return;
     }
 
@@ -394,7 +423,10 @@ export default function Pedidos() {
         <h2 style={{ margin: 0 }}>Pedidos</h2>
         <button
           type="button"
-          onClick={() => loadOrders({ notifyOnError: true })}
+          onClick={async () => {
+            const ok = await loadOrders({ notifyOnError: true });
+            if (ok) showToast(OPERATION_MESSAGES.loadSuccess, "success");
+          }}
           style={secondaryBtn}
         >
           Recargar
@@ -402,7 +434,7 @@ export default function Pedidos() {
       </div>
 
       <div style={filterCard}>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={inputStyle}>
+        <select value={statusFilter} onChange={(e) => updatePreference("statusFilter", e.target.value)} style={inputStyle}>
           <option value="all">Todos los estados</option>
           {ORDER_STATUS.map((status) => (
             <option key={status} value={status}>
@@ -414,16 +446,37 @@ export default function Pedidos() {
         <input
           type="text"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => updatePreference("search", e.target.value)}
           style={{ ...inputStyle, minWidth: 220 }}
           placeholder="Buscar por cliente, teléfono, código cliente o ID interno"
         />
+
+
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => updatePreference("dateFrom", e.target.value)}
+          style={inputStyle}
+        />
+
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => updatePreference("dateTo", e.target.value)}
+          style={inputStyle}
+        />
+
+        <select value={sortBy} onChange={(e) => updatePreference("sortBy", e.target.value)} style={inputStyle}>
+          <option value="newest">Más recientes</option>
+          <option value="oldest">Más antiguos</option>
+          <option value="total_desc">Mayor total</option>
+        </select>
 
         <label style={toggleLabel}>
           <input
             type="checkbox"
             checked={autoRefresh}
-            onChange={(e) => setAutoRefresh(e.target.checked)}
+            onChange={(e) => updatePreference("autoRefresh", e.target.checked)}
           />
           Auto-actualizar (20s)
         </label>
@@ -476,8 +529,7 @@ export default function Pedidos() {
                         <td style={tdStyle}>
                           <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                             <span style={{ ...badgeStyle, ...getStatusStyle(order.estado) }}>{humanStatus(order.estado)}</span>
-                            <small style={{ color: "#4b5563" }}>({order.estado || "-"})</small>
-                          </div>
+                                                      </div>
                         </td>
                       </tr>
                     );
@@ -552,7 +604,8 @@ export default function Pedidos() {
                   </select>
                 </div>
 
-                <label style={toggleLabel}>
+
+        <label style={toggleLabel}>
                   <input
                     type="checkbox"
                     checked={Boolean(selectedOrder.paid)}
