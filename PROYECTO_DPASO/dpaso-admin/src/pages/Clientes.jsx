@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
+import useAdminPreferences from "../hooks/useAdminPreferences";
+import { OPERATION_MESSAGES, resolveErrorMessage } from "../utils/operationMessages";
 
 function money(value) {
   return `S/ ${Number(value || 0).toFixed(2)}`;
@@ -13,21 +15,45 @@ function formatDate(value) {
   return new Date(value).toLocaleString();
 }
 
+function getDaysSince(dateValue) {
+  if (!dateValue) return 9999;
+  const now = Date.now();
+  const d = new Date(dateValue).getTime();
+  return Math.floor((now - d) / (1000 * 60 * 60 * 24));
+}
+
+function getClientSegment(client) {
+  const orders = Number(client?.total_orders || 0);
+  const spent = Number(client?.total_spent || 0);
+  const days = getDaysSince(client?.last_order_at);
+  if (orders >= 6) return "Frecuente";
+  if (spent >= 220) return "Ticket alto";
+  if (days > 30) return "Inactivo";
+  return "Regular";
+}
+
 export default function Clientes() {
   const navigate = useNavigate();
   const { toast, showToast } = useToast(2600);
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [clients, setClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState(null);
   const [orders, setOrders] = useState([]);
-  const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState("last_order_at");
+  const [preferences, setPreferences] = useAdminPreferences("dpaso_admin_clientes_filters", {
+    search: "",
+    sortBy: "last_order_at",
+    dateFrom: "",
+    dateTo: "",
+  });
+  const { search, sortBy, dateFrom, dateTo } = preferences;
 
-  const loadClients = useCallback(async () => {
-    setLoading(true);
+  const loadClients = useCallback(async ({silent = false} = {}) => {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
 
     let query = supabase
       .from("customers")
@@ -48,19 +74,33 @@ export default function Clientes() {
     const { data, error } = await query;
 
     if (error) {
-      showToast(error.message || "No se pudo cargar clientes", "error");
+      showToast(resolveErrorMessage(error, OPERATION_MESSAGES.loadError), "error");
       setLoading(false);
-      return;
+      setRefreshing(false);
+      return false;
     }
 
-    const rows = data || [];
+    const rows = (data || []).filter((row) => {
+      const d = row.last_order_at ? new Date(row.last_order_at) : null;
+      if (dateFrom) {
+        const start = new Date(`${dateFrom}T00:00:00`);
+        if (!d || d < start) return false;
+      }
+      if (dateTo) {
+        const end = new Date(`${dateTo}T23:59:59`);
+        if (!d || d > end) return false;
+      }
+      return true;
+    });
     setClients(rows);
     setSelectedClient((prev) => {
       if (!prev?.id) return rows[0] || null;
       return rows.find((r) => r.id === prev.id) || rows[0] || null;
     });
     setLoading(false);
-  }, [search, showToast, sortBy]);
+    setRefreshing(false);
+    return true;
+  }, [dateFrom, dateTo, search, showToast, sortBy]);
 
   const loadClientOrders = useCallback(async (customerId) => {
     if (!customerId) {
@@ -77,7 +117,7 @@ export default function Clientes() {
       .limit(100);
 
     if (error) {
-      showToast(error.message || "No se pudo cargar historial", "error");
+      showToast(resolveErrorMessage(error, OPERATION_MESSAGES.loadError), "error");
       setOrders([]);
       setDetailLoading(false);
       return;
@@ -106,11 +146,11 @@ export default function Clientes() {
     setSyncing(true);
     const { data, error } = await supabase.rpc("rpc_backfill_customers_from_orders");
     if (error) {
-      showToast(error.message || "No se pudo sincronizar", "error");
+      showToast(resolveErrorMessage(error, OPERATION_MESSAGES.saveError), "error");
       setSyncing(false);
       return;
     }
-    showToast(`Sincronización OK (${data?.processed_phones || 0} teléfonos) ✅`, "success");
+    showToast(`Sincronización OK (${data?.processed_phones || 0} teléfonos).`, "success");
     await loadClients();
     setSyncing(false);
   }
@@ -126,13 +166,37 @@ export default function Clientes() {
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank", "noopener,noreferrer");
   }
 
+  function sendTemplate(type) {
+    if (!selectedClient?.phone) {
+      showToast("Cliente sin teléfono", "error");
+      return;
+    }
+    const digits = String(selectedClient.phone).replace(/\D/g, "");
+    const phone = digits.startsWith("51") ? digits : `51${digits}`;
+
+    const templates = {
+      confirmation: `Hola ${selectedClient.name || "cliente"}, gracias por tu compra en DPASO. Tu pedido fue confirmado ✅`,
+      followup: `Hola ${selectedClient.name || "cliente"}, ¿cómo estuvo tu experiencia con DPASO? Te leemos 🙌`,
+      reactivation: `Hola ${selectedClient.name || "cliente"}, te extrañamos en DPASO 😄. Tenemos novedades para ti.`,
+    };
+
+    const msg = templates[type] || templates.followup;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank", "noopener,noreferrer");
+  }
+
+  const noRepurchaseClients = useMemo(() => {
+    return clients
+      .filter((client) => getDaysSince(client.last_order_at) > 30)
+      .slice(0, 8);
+  }, [clients]);
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <Toast toast={toast} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
         <h2 style={{ margin: 0 }}>Clientes</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" style={secondaryBtn} onClick={() => loadClients()} disabled={loading}>Recargar</button>
+          <button type="button" style={secondaryBtn} onClick={async () => { const ok = await loadClients({ silent: true }); if (ok) showToast(OPERATION_MESSAGES.loadSuccess, "success"); }} disabled={loading || refreshing}>Recargar</button>
           <button type="button" style={primaryBtn} onClick={runBackfill} disabled={syncing}>
             {syncing ? "Sincronizando..." : "Sincronizar desde pedidos"}
           </button>
@@ -144,10 +208,23 @@ export default function Clientes() {
           type="text"
           style={inputStyle}
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => setPreferences((prev) => ({ ...prev, search: e.target.value }))}
           placeholder="Buscar por nombre o teléfono"
         />
-        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={inputStyle}>
+
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setPreferences((prev) => ({ ...prev, dateFrom: e.target.value }))}
+          style={inputStyle}
+        />
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => setPreferences((prev) => ({ ...prev, dateTo: e.target.value }))}
+          style={inputStyle}
+        />
+        <select value={sortBy} onChange={(e) => setPreferences((prev) => ({ ...prev, sortBy: e.target.value }))} style={inputStyle}>
           <option value="last_order_at">Ordenar por última compra</option>
           <option value="total_spent">Ordenar por total gastado</option>
         </select>
@@ -157,6 +234,8 @@ export default function Clientes() {
         <section style={cardStyle}>
           {loading ? (
             <p>Cargando clientes...</p>
+          ) : refreshing ? (
+            <p>Actualizando resultados...</p>
           ) : clients.length === 0 ? (
             <p>No hay clientes con los filtros actuales.</p>
           ) : (
@@ -205,8 +284,17 @@ export default function Clientes() {
               <p style={line}><strong>Total gastado:</strong> {money(selectedClient.total_spent)}</p>
               <p style={line}><strong>Ticket promedio:</strong> {money(ticketPromedio)}</p>
               <p style={line}><strong>Última compra:</strong> {formatDate(selectedClient.last_order_at)}</p>
+              <p style={line}><strong>Segmento:</strong> {getClientSegment(selectedClient)}</p>
 
               <button type="button" style={waBtn} onClick={openWhatsApp}>WhatsApp cliente</button>
+              <div style={{ display: "grid", gap: 8 }}>
+                <strong>Plantillas postventa</strong>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  <button type="button" style={secondaryBtn} onClick={() => sendTemplate("confirmation")}>Confirmación</button>
+                  <button type="button" style={secondaryBtn} onClick={() => sendTemplate("followup")}>Seguimiento</button>
+                  <button type="button" style={secondaryBtn} onClick={() => sendTemplate("reactivation")}>Reactivación</button>
+                </div>
+              </div>
 
               <hr style={{ border: 0, borderTop: "1px solid #e5e7eb", margin: "4px 0" }} />
               <strong>Historial de pedidos</strong>
@@ -243,6 +331,25 @@ export default function Clientes() {
           )}
         </aside>
       </div>
+
+      <section style={cardStyle}>
+        <h3 style={{ marginTop: 0 }}>Recordatorios automáticos (sin recompra &gt; 30 días)</h3>
+        {noRepurchaseClients.length === 0 ? (
+          <p style={{ marginBottom: 0 }}>No hay clientes pendientes de reactivación.</p>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {noRepurchaseClients.map((client) => (
+              <div key={client.id} style={orderRow}>
+                <div style={{ display: "grid" }}>
+                  <strong>{client.name || "Cliente"}</strong>
+                  <small>{client.phone || "Sin teléfono"}</small>
+                </div>
+                <small>{getDaysSince(client.last_order_at)} días sin recompra</small>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <style>{`
         @media (max-width: 1080px) {
