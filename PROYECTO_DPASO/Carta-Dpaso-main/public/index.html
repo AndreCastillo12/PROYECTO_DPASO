@@ -141,25 +141,32 @@
 
 <div id="cart-toast" class="cart-toast" aria-live="polite"></div>
 
-<header class="header">
+<header class="header app-header">
+  <button class="menu-trigger" type="button" aria-label="Menú">☰</button>
   <img src="images/Logos/logo.jpg" class="logo" alt="Logo DPASO">
   <div class="header-text">
-    <h1>CARTA DPASO</h1>
-    <p>Cocina Libre · Pescados & Mariscos</p>
+    <h1>DPASO</h1>
+    <p>Cocina Libre</p>
   </div>
-  <div class="header-account">
+
+  <div class="header-search-wrap">
+    <input id="menu-search" class="header-search" type="search" placeholder="Buscar platos...">
+  </div>
+
+  <div class="header-actions">
+    <button id="btnTrackingTop" class="top-pill-btn" type="button">🛵 Rastrear</button>
     <button id="auth-account-btn" class="auth-account-btn" type="button">Iniciar sesión</button>
     <button id="auth-history-btn" class="auth-history-btn" type="button" style="display:none;">Mis pedidos</button>
   </div>
 </header>
 
-<nav class="nav">
-  <a href="#picar">Pa’ Picar</a>
-  <a href="#comer">Pa’ Comer</a>
-  <a href="#combos">Combos</a>
-  <a href="#calientes">Calientes</a>
-  <a href="#bebidas">Bebidas</a>
-</nav>
+<section class="hero-banner">
+  <p class="hero-overline">CARTA ONLINE</p>
+  <h2>Sabores marinos y criollos con estilo DPASO</h2>
+  <p>Elige por categoría, agrega al carrito y confirma tu pedido en minutos.</p>
+</section>
+
+<nav class="nav"></nav>
 
 <section class="menu" id="menu"></section>
 

@@ -501,6 +501,7 @@ async function fetchOrderStatus(code, options = {}) {
 function setupTrackingEvents() {
   const scope = getOrCreateListenerScope('tracking');
   const openBtn = document.getElementById('btnTracking');
+  const topBtn = document.getElementById('btnTrackingTop');
   const floatBtn = document.getElementById('tracking-float-btn');
   const closeBtn = document.getElementById('trackingCloseBtn');
   const searchBtn = document.getElementById('trackingSearchBtn');
@@ -513,6 +514,11 @@ function setupTrackingEvents() {
     event.preventDefault();
     openTrackingModal();
   }, {}, 'tracking:open-link');
+
+  bindScopedListener(scope, topBtn, 'click', (event) => {
+    event.preventDefault();
+    openTrackingModal();
+  }, {}, 'tracking:open-top');
 
   bindScopedListener(scope, floatBtn, 'click', () => {
     openTrackingModal();
@@ -1635,6 +1641,7 @@ async function submitOrder(eventOrForm) {
 async function cargarMenu() {
   const menu = document.getElementById('menu');
   const nav = document.querySelector('.nav');
+  const searchInput = document.getElementById('menu-search');
   if (!menu || !nav) return;
 
   try {
@@ -1657,75 +1664,164 @@ async function cargarMenu() {
     menu.innerHTML = '';
     nav.innerHTML = '';
 
-    categoriasData.forEach(cat => {
-      const items = platosData.filter(p => p.categoria_id === cat.id);
+    const query = String(searchInput?.value || '').trim().toLowerCase();
+
+    categoriasData.forEach((cat) => {
+      const items = (platosData || []).filter((p) => p.categoria_id === cat.id)
+        .filter((p) => !query || String(p.nombre || '').toLowerCase().includes(query) || String(p.descripcion || '').toLowerCase().includes(query));
 
       const navLink = document.createElement('a');
       navLink.href = `#${cat.id}`;
       navLink.textContent = cat.nombre;
       nav.appendChild(navLink);
 
+      const sectionWrap = document.createElement('section');
+      sectionWrap.className = 'category-section fade-up';
+      sectionWrap.id = cat.id;
+
       const h2 = document.createElement('h2');
-      h2.className = 'section-title fade-up';
-      h2.id = cat.id;
+      h2.className = 'section-title';
       h2.textContent = cat.nombre;
-      menu.appendChild(h2);
+      sectionWrap.appendChild(h2);
 
-      if (items.length > 0) {
-        items.forEach(item => {
-          const div = document.createElement('div');
-          div.className = 'plato fade-up';
-          const soldOut = isPlatoSoldOut(item);
-          const stockText = soldOut ? '<span class="sold-out-badge">Agotado</span>' : '';
-
-          const imageUrl = item.imagen
-            ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
-            : 'images/Logos/logo.jpg';
-
-          div.innerHTML = `
-            <img src="${imageUrl}" alt="${item.nombre}">
-            <h3>${item.nombre}</h3>
-            <p>${item.descripcion || ''}</p>
-            <span>${formatCurrency(item.precio)}</span>
-            ${stockText}
-            <button type="button" class="add-cart-btn" ${soldOut ? 'disabled title="Producto agotado"' : ''}>Agregar al carrito</button>
-          `;
-
-          div.querySelector('.add-cart-btn')?.addEventListener('click', () => {
-            if (soldOut) return;
-            addToCart({
-              id: item.id,
-              nombre: item.nombre,
-              precio: item.precio,
-              imagen: imageUrl
-            });
-            showCartToast(`✅ ${item.nombre} agregado al carrito`);
-          });
-
-          menu.appendChild(div);
-        });
-      } else {
+      if (!items.length) {
         const emptyDiv = document.createElement('div');
-        emptyDiv.className = 'plato fade-up';
+        emptyDiv.className = 'plato';
         emptyDiv.innerHTML = '<p>No hay platos en esta categoría.</p>';
-        menu.appendChild(emptyDiv);
+        sectionWrap.appendChild(emptyDiv);
+        menu.appendChild(sectionWrap);
+        return;
       }
+
+      const row = document.createElement('div');
+      row.className = 'category-row';
+      row.innerHTML = `
+        <button type="button" class="carousel-arrow" data-action="prev">‹</button>
+        <div class="carousel-viewport"><div class="carousel-track"></div></div>
+        <button type="button" class="carousel-arrow" data-action="next">›</button>
+      `;
+
+      const track = row.querySelector('.carousel-track');
+
+      items.forEach((item) => {
+        const soldOut = isPlatoSoldOut(item);
+        const stockText = soldOut ? '<span class="sold-out-badge">Agotado</span>' : '';
+        const imageUrl = item.imagen
+          ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
+          : 'images/Logos/logo.jpg';
+
+        const card = document.createElement('article');
+        card.className = 'plato';
+        card.innerHTML = `
+          <img src="${imageUrl}" alt="${item.nombre}">
+          <h3>${item.nombre}</h3>
+          <p>${item.descripcion || ''}</p>
+          <span>${formatCurrency(item.precio)}</span>
+          ${stockText}
+          <button type="button" class="add-cart-btn" data-item-id="${item.id}" ${soldOut ? 'disabled title="Producto agotado"' : ''}>+ Agregar</button>
+        `;
+        track.appendChild(card);
+      });
+
+      track.addEventListener('click', (event) => {
+        const btn = event.target.closest('.add-cart-btn');
+        if (!btn) return;
+        const itemId = btn.dataset.itemId;
+        const item = items.find((it) => String(it.id) === String(itemId));
+        if (!item || isPlatoSoldOut(item)) return;
+
+        const imageUrl = item.imagen
+          ? `${SUPABASE_URL}/storage/v1/object/public/platos/${item.imagen}`
+          : 'images/Logos/logo.jpg';
+
+        addToCart({ id: item.id, nombre: item.nombre, precio: item.precio, imagen: imageUrl });
+        showCartToast(`✅ ${item.nombre} agregado al carrito`);
+      });
+
+      initInfiniteCarousel(row);
+      sectionWrap.appendChild(row);
+      menu.appendChild(sectionWrap);
     });
 
-    const observer = new IntersectionObserver(entries => {
-      entries.forEach(e => {
-        if (e.isIntersecting) {
-          e.target.classList.add('show');
-          observer.unobserve(e.target);
-        }
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('show');
+        observer.unobserve(e.target);
       });
     }, { threshold: 0.15 });
 
-    document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+    document.querySelectorAll('.fade-up').forEach((el) => observer.observe(el));
+
+    if (searchInput && !searchInput.dataset.boundInput) {
+      searchInput.addEventListener('input', () => cargarMenu());
+      searchInput.dataset.boundInput = '1';
+    }
   } catch (err) {
     console.error('❌ Error cargando menú:', err);
     menu.innerHTML = '<p>Error cargando el menú. Revisa la consola.</p>';
   }
+}
+
+function initInfiniteCarousel(row) {
+  const track = row.querySelector('.carousel-track');
+  const prev = row.querySelector('[data-action="prev"]');
+  const next = row.querySelector('[data-action="next"]');
+  if (!track || !prev || !next) return;
+
+  const original = Array.from(track.children);
+  if (original.length <= 1) return;
+
+  const cloneCount = Math.min(3, original.length);
+  const headClones = original.slice(0, cloneCount).map((n) => n.cloneNode(true));
+  const tailClones = original.slice(-cloneCount).map((n) => n.cloneNode(true));
+
+  tailClones.forEach((node) => track.insertBefore(node, track.firstChild));
+  headClones.forEach((node) => track.appendChild(node));
+
+  let index = cloneCount;
+  const gap = 14;
+
+  function cardWidth() {
+    const card = track.children[0];
+    if (!card) return 220;
+    return card.getBoundingClientRect().width + gap;
+  }
+
+  function jump(animate = true) {
+    track.style.transition = animate ? 'transform .42s ease' : 'none';
+    track.style.transform = `translateX(${-index * cardWidth()}px)`;
+  }
+
+  function move(delta) {
+    index += delta;
+    jump(true);
+  }
+
+  prev.addEventListener('click', () => move(-1));
+  next.addEventListener('click', () => move(1));
+
+  track.addEventListener('transitionend', () => {
+    const maxIndex = original.length + cloneCount;
+    if (index >= maxIndex) {
+      index = cloneCount;
+      jump(false);
+    } else if (index < cloneCount) {
+      index = original.length + cloneCount - 1;
+      jump(false);
+    }
+  });
+
+  window.addEventListener('resize', () => jump(false));
+
+  let autoplay = setInterval(() => move(1), 3200);
+  row.addEventListener('mouseenter', () => clearInterval(autoplay));
+  row.addEventListener('mouseleave', () => {
+    clearInterval(autoplay);
+    autoplay = setInterval(() => move(1), 3200);
+  });
+
+  jump(false);
 }
 
 // ===============================
