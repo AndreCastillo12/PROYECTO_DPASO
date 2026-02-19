@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
+import { logCriticalEvent } from "../lib/observability";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -35,6 +36,7 @@ export default function Login() {
       if (error.message.includes("Invalid login")) {
         return showToast("Credenciales inválidas", "error");
       }
+      await logCriticalEvent("auth_error", "admin_login", error, { email });
       return showToast(error.message, "error");
     }
 
@@ -59,7 +61,10 @@ export default function Login() {
       redirectTo: window.location.origin + "/reset-password"
     });
 
-    if (error) showToast(error.message, "error");
+    if (error) {
+      await logCriticalEvent("auth_error", "admin_reset_password", error, { email });
+      showToast(error.message, "error");
+    }
     else showToast("Revisa tu correo para restablecer tu contraseña");
   }
 

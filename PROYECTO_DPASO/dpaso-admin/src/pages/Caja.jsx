@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
+import { logCriticalEvent, logOperationalMetric } from "../lib/observability";
 function money(value) {
   return `S/ ${Number(value || 0).toFixed(2)}`;
 }
@@ -82,6 +83,7 @@ export default function Caja() {
       .limit(1)
       .maybeSingle();
     if (error) {
+      await logCriticalEvent("admin_cash_error", "Caja:loadActiveSession", error);
       showToast("No se pudo cargar caja", "error");
       setLoading(false);
       return;
@@ -154,10 +156,12 @@ export default function Caja() {
       notes: openingNotes || null,
     });
     if (error) {
+      await logCriticalEvent("admin_cash_error", "Caja:abrirCaja", error, { openingAmount });
       showToast(error.message || "No se pudo abrir caja", "error");
       setBusy(false);
       return;
     }
+    await logOperationalMetric("cash_session_opened", { session_id: data?.id || null });
     showToast("Caja abierta ✅");
     setOpeningAmount("0");
     setOpeningNotes("");
@@ -237,6 +241,7 @@ export default function Caja() {
       p_notes: closingNotes || null,
     });
     if (error) {
+      await logCriticalEvent("admin_cash_error", "Caja:cerrarCaja", error, { sessionId });
       showToast(error.message || "No se pudo cerrar caja", "error");
       setBusy(false);
       return;
@@ -244,6 +249,7 @@ export default function Caja() {
     setLastCloseResult(data || null);
     setClosingAmount("");
     setClosingNotes("");
+    await logOperationalMetric("cash_session_closed", { session_id: sessionId });
     showToast("Caja cerrada ✅");
     await loadOpenSession();
     await loadHistory();
