@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
+import useAdminPreferences from "../hooks/useAdminPreferences";
+import { OPERATION_MESSAGES, resolveErrorMessage } from "../utils/operationMessages";
 
 function money(value) {
   return `S/ ${Number(value || 0).toFixed(2)}`;
@@ -18,16 +20,23 @@ export default function Clientes() {
   const { toast, showToast } = useToast(2600);
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [clients, setClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState(null);
   const [orders, setOrders] = useState([]);
-  const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState("last_order_at");
+  const [preferences, setPreferences] = useAdminPreferences("dpaso_admin_clientes_filters", {
+    search: "",
+    sortBy: "last_order_at",
+    dateFrom: "",
+    dateTo: "",
+  });
+  const { search, sortBy, dateFrom, dateTo } = preferences;
 
-  const loadClients = useCallback(async () => {
-    setLoading(true);
+  const loadClients = useCallback(async ({silent = false} = {}) => {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
 
     let query = supabase
       .from("customers")
@@ -48,19 +57,33 @@ export default function Clientes() {
     const { data, error } = await query;
 
     if (error) {
-      showToast(error.message || "No se pudo cargar clientes", "error");
+      showToast(resolveErrorMessage(error, OPERATION_MESSAGES.loadError), "error");
       setLoading(false);
-      return;
+      setRefreshing(false);
+      return false;
     }
 
-    const rows = data || [];
+    const rows = (data || []).filter((row) => {
+      const d = row.last_order_at ? new Date(row.last_order_at) : null;
+      if (dateFrom) {
+        const start = new Date(`${dateFrom}T00:00:00`);
+        if (!d || d < start) return false;
+      }
+      if (dateTo) {
+        const end = new Date(`${dateTo}T23:59:59`);
+        if (!d || d > end) return false;
+      }
+      return true;
+    });
     setClients(rows);
     setSelectedClient((prev) => {
       if (!prev?.id) return rows[0] || null;
       return rows.find((r) => r.id === prev.id) || rows[0] || null;
     });
     setLoading(false);
-  }, [search, showToast, sortBy]);
+    setRefreshing(false);
+    return true;
+  }, [dateFrom, dateTo, search, showToast, sortBy]);
 
   const loadClientOrders = useCallback(async (customerId) => {
     if (!customerId) {
@@ -77,7 +100,7 @@ export default function Clientes() {
       .limit(100);
 
     if (error) {
-      showToast(error.message || "No se pudo cargar historial", "error");
+      showToast(resolveErrorMessage(error, OPERATION_MESSAGES.loadError), "error");
       setOrders([]);
       setDetailLoading(false);
       return;
@@ -106,11 +129,11 @@ export default function Clientes() {
     setSyncing(true);
     const { data, error } = await supabase.rpc("rpc_backfill_customers_from_orders");
     if (error) {
-      showToast(error.message || "No se pudo sincronizar", "error");
+      showToast(resolveErrorMessage(error, OPERATION_MESSAGES.saveError), "error");
       setSyncing(false);
       return;
     }
-    showToast(`Sincronización OK (${data?.processed_phones || 0} teléfonos) ✅`, "success");
+    showToast(`Sincronización OK (${data?.processed_phones || 0} teléfonos).`, "success");
     await loadClients();
     setSyncing(false);
   }
@@ -132,7 +155,7 @@ export default function Clientes() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
         <h2 style={{ margin: 0 }}>Clientes</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" style={secondaryBtn} onClick={() => loadClients()} disabled={loading}>Recargar</button>
+          <button type="button" style={secondaryBtn} onClick={async () => { const ok = await loadClients({ silent: true }); if (ok) showToast(OPERATION_MESSAGES.loadSuccess, "success"); }} disabled={loading || refreshing}>Recargar</button>
           <button type="button" style={primaryBtn} onClick={runBackfill} disabled={syncing}>
             {syncing ? "Sincronizando..." : "Sincronizar desde pedidos"}
           </button>
@@ -144,10 +167,23 @@ export default function Clientes() {
           type="text"
           style={inputStyle}
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => setPreferences((prev) => ({ ...prev, search: e.target.value }))}
           placeholder="Buscar por nombre o teléfono"
         />
-        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={inputStyle}>
+
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setPreferences((prev) => ({ ...prev, dateFrom: e.target.value }))}
+          style={inputStyle}
+        />
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => setPreferences((prev) => ({ ...prev, dateTo: e.target.value }))}
+          style={inputStyle}
+        />
+        <select value={sortBy} onChange={(e) => setPreferences((prev) => ({ ...prev, sortBy: e.target.value }))} style={inputStyle}>
           <option value="last_order_at">Ordenar por última compra</option>
           <option value="total_spent">Ordenar por total gastado</option>
         </select>
@@ -157,6 +193,8 @@ export default function Clientes() {
         <section style={cardStyle}>
           {loading ? (
             <p>Cargando clientes...</p>
+          ) : refreshing ? (
+            <p>Actualizando resultados...</p>
           ) : clients.length === 0 ? (
             <p>No hay clientes con los filtros actuales.</p>
           ) : (
