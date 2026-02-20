@@ -3,6 +3,8 @@ import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import { exportRowsToCsv } from "../utils/csv";
+import useAdminPreferences from "../hooks/useAdminPreferences";
+import { OPERATION_MESSAGES, resolveErrorMessage } from "../utils/operationMessages";
 
 const REPORT_TYPES = [
   { value: "day", label: "Ventas por día" },
@@ -24,19 +26,28 @@ function money(value) {
   return `S/ ${Number(value || 0).toFixed(2)}`;
 }
 
+const DEFAULT_DATE_TO = toDateInput(new Date());
+const DEFAULT_DATE_FROM = toDateInput(new Date(new Date(DEFAULT_DATE_TO).getTime() - 6 * 24 * 60 * 60 * 1000));
+
 export default function Reportes() {
   const { toast, showToast } = useToast(2500);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [rows, setRows] = useState([]);
   const [kpis, setKpis] = useState({ totalSales: 0, totalOrders: 0, ticketPromedio: 0, cancelPct: 0 });
   const [opMetrics, setOpMetrics] = useState({ conversion_rate: 0, dropped_orders: 0, avg_rpc_ms: 0 });
 
-  const [dateFrom, setDateFrom] = useState(toDateInput(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)));
-  const [dateTo, setDateTo] = useState(toDateInput(new Date()));
-  const [groupBy, setGroupBy] = useState("day");
+  const [preferences, setPreferences] = useAdminPreferences("dpaso_admin_reportes_filters", {
+    dateFrom: DEFAULT_DATE_FROM,
+    dateTo: DEFAULT_DATE_TO,
+    groupBy: "day",
+    orderBy: "sales_desc",
+  });
+  const { dateFrom, dateTo, groupBy, orderBy } = preferences;
 
-  async function loadReport() {
-    setLoading(true);
+  async function loadReport({ silent = false } = {}) {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
     const fromIso = new Date(`${dateFrom}T00:00:00`).toISOString();
     const toIso = new Date(`${dateTo}T23:59:59`).toISOString();
 
@@ -47,13 +58,19 @@ export default function Reportes() {
     });
 
     if (error) {
-      showToast(error.message || "No se pudo cargar reporte", "error");
+      showToast(resolveErrorMessage(error, OPERATION_MESSAGES.loadError), "error");
       setRows([]);
       setLoading(false);
-      return;
+      setRefreshing(false);
+      return false;
     }
 
-    setRows(data || []);
+    const orderedRows = [...(data || [])].sort((a, b) => {
+      if (orderBy === "sales_asc") return Number(a.total_sales || 0) - Number(b.total_sales || 0);
+      if (orderBy === "orders_desc") return Number(b.orders_count || 0) - Number(a.orders_count || 0);
+      return Number(b.total_sales || 0) - Number(a.total_sales || 0);
+    });
+    setRows(orderedRows);
 
     const { data: kpiOrders, error: kpiError } = await supabase
       .from("orders")
@@ -62,7 +79,7 @@ export default function Reportes() {
       .lte("created_at", toIso);
 
     if (kpiError) {
-      showToast("No se pudieron calcular KPIs", "warning");
+      showToast(resolveErrorMessage(kpiError, "No se pudieron calcular KPIs."), "warning");
     } else {
       const safeOrders = kpiOrders || [];
       const totalOrders = safeOrders.length;
@@ -92,6 +109,8 @@ export default function Reportes() {
     }
 
     setLoading(false);
+    setRefreshing(false);
+    return true;
   }
 
   useEffect(() => {
@@ -117,15 +136,21 @@ export default function Reportes() {
 
       <section style={cardStyle}>
         <div style={filtersGrid}>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
-          <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} style={inputStyle}>
+          <input type="date" value={dateFrom} onChange={(e) => setPreferences((prev) => ({ ...prev, dateFrom: e.target.value }))} style={inputStyle} />
+          <input type="date" value={dateTo} onChange={(e) => setPreferences((prev) => ({ ...prev, dateTo: e.target.value }))} style={inputStyle} />
+          <select value={groupBy} onChange={(e) => setPreferences((prev) => ({ ...prev, groupBy: e.target.value }))} style={inputStyle}>
             {REPORT_TYPES.map((r) => (
               <option key={r.value} value={r.value}>{r.label}</option>
             ))}
           </select>
-          <button type="button" onClick={loadReport} style={btnPrimary} disabled={loading}>
-            {loading ? "Cargando..." : "Aplicar"}
+
+          <select value={orderBy} onChange={(e) => setPreferences((prev) => ({ ...prev, orderBy: e.target.value }))} style={inputStyle}>
+            <option value="sales_desc">Orden: mayor venta</option>
+            <option value="sales_asc">Orden: menor venta</option>
+            <option value="orders_desc">Orden: más pedidos</option>
+          </select>
+          <button type="button" onClick={async () => { const ok = await loadReport({ silent: true }); if (ok) showToast(OPERATION_MESSAGES.loadSuccess, "success"); }} style={btnPrimary} disabled={loading || refreshing}>
+            {loading || refreshing ? "Cargando..." : "Aplicar"}
           </button>
           <button type="button" onClick={onExportCsv} style={btnSecondary}>
             Exportar CSV
@@ -147,6 +172,7 @@ export default function Reportes() {
       </section>
 
       <section style={cardStyle}>
+        {refreshing && <p style={{ marginTop: 0, color: "#64748b" }}>Actualizando reporte sin bloquear la vista...</p>}
         <div style={{ overflowX: "auto" }}>
           <table style={tableStyle}>
             <thead>
