@@ -120,6 +120,7 @@ declare
   v_item_subtotal numeric;
   v_items_subtotal_calc numeric := 0;
   v_has_zone boolean := false;
+  v_for_other boolean := false;
 
   v_plato_nombre_actual text;
   v_plato_available boolean;
@@ -155,6 +156,7 @@ begin
   v_referencia := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'referencia', '')), '');
   v_provincia := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'provincia', '')), '');
   v_distrito := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'distrito', '')), '');
+  v_for_other := lower(coalesce(v_customer ->> 'for_other', 'false')) in ('true', '1', 't', 'yes', 'y', 'on');
 
   if v_name = '' then
     raise exception 'customer.name es obligatorio';
@@ -226,21 +228,21 @@ begin
     v_name,
     v_phone,
     nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
-    v_uid
+    case when v_for_other then null else v_uid end
   )
   on conflict (phone) do update
     set name = excluded.name,
         normalized_phone = excluded.normalized_phone,
         user_id = case
+          when v_for_other then public.customers.user_id
           when public.customers.user_id is null and excluded.user_id is not null then excluded.user_id
           else public.customers.user_id
         end,
         updated_at = now()
   returning id, user_id into v_customer_id, v_customer_user_id;
 
-  if v_uid is not null and v_customer_user_id is not null and v_customer_user_id <> v_uid then
-    raise exception 'PHONE_ALREADY_LINKED';
-  end if;
+  -- Permitir pedidos para terceros con otro teléfono aun con sesión iniciada.
+  -- Conservamos la relación previa del customer, pero no bloqueamos la orden.
 
   insert into public.orders (
     nombre_cliente,
