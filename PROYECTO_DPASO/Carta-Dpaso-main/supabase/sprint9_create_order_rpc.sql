@@ -238,9 +238,8 @@ begin
         updated_at = now()
   returning id, user_id into v_customer_id, v_customer_user_id;
 
-  if v_uid is not null and v_customer_user_id is not null and v_customer_user_id <> v_uid then
-    raise exception 'PHONE_ALREADY_LINKED';
-  end if;
+  -- Permitir pedidos para terceros con otro teléfono aun con sesión iniciada.
+  -- Conservamos la relación previa del customer, pero no bloqueamos la orden.
 
   insert into public.orders (
     nombre_cliente,
