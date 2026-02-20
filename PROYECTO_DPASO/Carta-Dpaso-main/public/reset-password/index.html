@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Restablecer contraseña | DPASO</title>
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+  <main style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#f8fafc;">
+    <section class="tracking-modal-card auth-modal-card profile-modal-card" style="max-width:480px;width:100%;">
+      <h3>Cambiar contraseña</h3>
+      <p id="reset-description" class="tracking-muted">Ingresa tu nueva contraseña.</p>
+      <form id="reset-form" class="auth-form">
+        <label for="reset-password">Nueva contraseña</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="reset-password" type="password" minlength="8" autocomplete="new-password" required style="flex:1;">
+          <button id="reset-toggle-password" class="tracking-btn tracking-ghost" type="button">Mostrar</button>
+        </div>
+        <small id="reset-password-error" class="auth-field-error" style="display:block;"></small>
+
+        <label for="reset-confirm-password">Confirmar contraseña</label>
+        <input id="reset-confirm-password" type="password" minlength="8" autocomplete="new-password" required>
+        <small id="reset-confirm-password-error" class="auth-field-error" style="display:block;"></small>
+
+        <button id="reset-submit-btn" class="tracking-btn tracking-primary tracking-full" type="submit" disabled>Guardar</button>
+        <p id="reset-feedback" class="checkout-feedback"></p>
+      </form>
+
+      <div id="reset-invalid-actions" style="display:none;margin-top:12px;">
+        <a href="../index.html" class="auth-forgot-link">Volver a “Olvidé mi contraseña”</a>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = 'https://gtczpfxdkiajprnluokq.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd0Y3pwZnhka2lhanBybmx1b2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTc5MTAsImV4cCI6MjA4NTk3MzkxMH0.UrV46fOq-YFQWykvR-eqPmlr-33w1aC7ynmywu_nsQ8';
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const resetForm = document.getElementById('reset-form');
+    const passwordInput = document.getElementById('reset-password');
+    const confirmInput = document.getElementById('reset-confirm-password');
+    const submitBtn = document.getElementById('reset-submit-btn');
+    const feedback = document.getElementById('reset-feedback');
+    const invalidActions = document.getElementById('reset-invalid-actions');
+    const resetDescription = document.getElementById('reset-description');
+    const passwordError = document.getElementById('reset-password-error');
+    const confirmError = document.getElementById('reset-confirm-password-error');
+
+    let resetBusy = false;
+    let resetLinkValid = false;
+
+    function setFeedback(message = '', type = 'info') {
+      feedback.textContent = message;
+      feedback.className = `checkout-feedback ${type}`;
+    }
+
+    function validateForm() {
+      const password = String(passwordInput.value || '');
+      const confirm = String(confirmInput.value || '');
+      passwordError.textContent = '';
+      confirmError.textContent = '';
+
+      if (!password) {
+        passwordError.textContent = 'Ingresa una contraseña.';
+      } else if (password.length < 8) {
+        passwordError.textContent = 'La contraseña debe tener mínimo 8 caracteres.';
+      }
+
+      if (!confirm) {
+        confirmError.textContent = 'Confirma tu contraseña.';
+      } else if (confirm !== password) {
+        confirmError.textContent = 'Las contraseñas no coinciden.';
+      }
+
+      const valid = !passwordError.textContent && !confirmError.textContent;
+      submitBtn.disabled = !valid || resetBusy || !resetLinkValid;
+      return valid;
+    }
+
+    async function ensureRecoverySession() {
+      const params = new URLSearchParams(window.location.search);
+      const tokenHash = params.get('token_hash');
+      const type = params.get('type');
+
+      try {
+        if (tokenHash && type === 'recovery') {
+          const { error } = await supabaseClient.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash });
+          if (error) throw error;
+        }
+
+        const { data, error } = await supabaseClient.auth.getSession();
+        if (error) throw error;
+
+        resetLinkValid = Boolean(data?.session);
+      } catch (error) {
+        console.error('Error validando enlace de recovery:', {
+          message: error?.message,
+          status: error?.status,
+          code: error?.code
+        });
+        resetLinkValid = false;
+      }
+
+      if (!resetLinkValid) {
+        setFeedback('Enlace inválido o expirado.', 'error');
+        resetDescription.textContent = 'Solicita un nuevo enlace para recuperar tu contraseña.';
+        invalidActions.style.display = 'block';
+        resetForm.querySelectorAll('input,button').forEach((el) => { el.disabled = true; });
+        return;
+      }
+
+      validateForm();
+    }
+
+    document.getElementById('reset-toggle-password').addEventListener('click', () => {
+      const showing = passwordInput.type === 'text';
+      passwordInput.type = showing ? 'password' : 'text';
+      confirmInput.type = showing ? 'password' : 'text';
+      document.getElementById('reset-toggle-password').textContent = showing ? 'Mostrar' : 'Ocultar';
+    });
+
+    passwordInput.addEventListener('input', validateForm);
+    confirmInput.addEventListener('input', validateForm);
+
+    resetForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (resetBusy || !validateForm()) return;
+
+      const previousText = submitBtn.textContent;
+      resetBusy = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Guardando...';
+      setFeedback('');
+
+      try {
+        const { error } = await supabaseClient.auth.updateUser({ password: String(passwordInput.value || '') });
+        if (error) throw error;
+        setFeedback('Contraseña actualizada.', 'success');
+        setTimeout(() => { window.location.href = '../index.html'; }, 1200);
+      } catch (error) {
+        console.error('Error actualizando contraseña:', {
+          message: error?.message,
+          status: error?.status,
+          code: error?.code
+        });
+        setFeedback('Ocurrió un error, intenta nuevamente.', 'error');
+      } finally {
+        resetBusy = false;
+        submitBtn.textContent = previousText;
+        validateForm();
+      }
+    });
+
+    ensureRecoverySession();
+  </script>
+</body>
+</html>
