@@ -58,6 +58,7 @@ if (typeof appRuntime.orderCancelBusy !== 'boolean') appRuntime.orderCancelBusy 
 if (!Array.isArray(appRuntime.lastCartPriceChanges)) appRuntime.lastCartPriceChanges = [];
 if (typeof appRuntime.lastCartPriceChangeDigest !== 'string') appRuntime.lastCartPriceChangeDigest = '';
 if (typeof appRuntime.autoReceiptEmailSentFor !== 'string') appRuntime.autoReceiptEmailSentFor = '';
+if (typeof appRuntime.receiptSendBusy !== 'boolean') appRuntime.receiptSendBusy = false;
 if (typeof appRuntime.recoveryBusy !== 'boolean') appRuntime.recoveryBusy = false;
 if (!appRuntime.emailCooldownUntil || typeof appRuntime.emailCooldownUntil !== 'object') appRuntime.emailCooldownUntil = {};
 if (!appRuntime.emailCooldownTimers || typeof appRuntime.emailCooldownTimers !== 'object') appRuntime.emailCooldownTimers = {};
@@ -1012,14 +1013,63 @@ function buildWhatsAppMessage(orderData) {
   return `https://wa.me/${WA_PHONE}?text=${encodeURIComponent(lines.join('\n'))}`;
 }
 
-function buildReceiptEmailLink(orderData) {
-  if (!orderData) return '';
-  const recipient = normalizeEmail(orderData.email || appRuntime.lastAuthEmail || '');
-  if (!recipient) return '';
-  const shortId = orderData.short_id || getShortOrderId(orderData.id);
-  const subject = `Comprobante de pedido DPASO #${shortId}`;
-  const body = buildReceiptText(orderData);
-  return `mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+async function sendReceiptEmail(orderData, { trigger = 'manual' } = {}) {
+  if (!orderData?.id) return { ok: false, reason: 'ORDER_ID_REQUIRED' };
+
+  const receiptEmail = normalizeEmail(orderData.email || appRuntime.lastAuthEmail || '');
+  const receiptToken = String(orderData.receipt_token || '').trim();
+
+  if (!receiptEmail) {
+    if (trigger === 'manual') showFeedback('No hay correo válido para enviar el comprobante.', 'error');
+    return { ok: false, reason: 'EMAIL_REQUIRED' };
+  }
+  if (!receiptToken) {
+    if (trigger === 'manual') showFeedback('No se encontró token de seguridad del comprobante.', 'error');
+    return { ok: false, reason: 'TOKEN_REQUIRED' };
+  }
+  if (appRuntime.receiptSendBusy) return { ok: false, reason: 'BUSY' };
+
+  const receiptBtn = document.getElementById('receipt-email-btn');
+  appRuntime.receiptSendBusy = true;
+
+  const prevText = receiptBtn?.textContent || 'Enviar comprobante por correo';
+  if (receiptBtn) {
+    receiptBtn.disabled = true;
+    receiptBtn.textContent = 'Enviando...';
+  }
+
+  try {
+    const { data, error } = await supabaseClient.functions.invoke('send-receipt', {
+      body: {
+        order_id: orderData.id,
+        email: receiptEmail,
+        token: receiptToken
+      }
+    });
+
+    if (error) throw error;
+
+    showCartToast(`📧 Comprobante enviado a ${receiptEmail}`);
+    if (trigger === 'manual') showFeedback(`Comprobante enviado al correo ${receiptEmail}.`, 'success');
+    return { ok: true, data };
+  } catch (error) {
+    console.error('❌ Error enviando comprobante por Edge Function:', {
+      message: error?.message,
+      details: error?.context?.details || error?.details,
+      hint: error?.context?.hint || error?.hint,
+      status: error?.context?.status || error?.status,
+      trigger,
+      orderId: orderData?.id
+    });
+    if (trigger === 'manual') showFeedback('No se pudo enviar el comprobante por correo. Intenta nuevamente.', 'error');
+    return { ok: false, reason: String(error?.message || 'SEND_RECEIPT_FAILED') };
+  } finally {
+    appRuntime.receiptSendBusy = false;
+    if (receiptBtn) {
+      receiptBtn.disabled = false;
+      receiptBtn.textContent = prevText;
+    }
+  }
 }
 
 function openReceiptModal() {
@@ -1071,26 +1121,24 @@ function renderReceipt(orderData) {
   }
 
   const receiptEmail = normalizeEmail(orderData.email || '');
-  const emailLink = buildReceiptEmailLink(orderData);
   const isLoggedInOrder = receiptEmail && normalizeEmail(appRuntime.lastAuthEmail || '') === receiptEmail;
 
   if (receiptEmailBtn) {
-    if (!isLoggedInOrder && emailLink) {
+    if (!isLoggedInOrder && receiptEmail) {
       receiptEmailBtn.style.display = 'inline-flex';
-      receiptEmailBtn.dataset.mailto = emailLink;
+      receiptEmailBtn.dataset.email = receiptEmail;
       receiptEmailBtn.textContent = `Enviar comprobante por correo (${receiptEmail})`;
     } else {
       receiptEmailBtn.style.display = 'none';
-      receiptEmailBtn.dataset.mailto = '';
+      receiptEmailBtn.dataset.email = '';
     }
   }
 
-  if (isLoggedInOrder && emailLink) {
+  if (isLoggedInOrder && receiptEmail) {
     const orderRef = orderData.short_code || shortId;
     if (appRuntime.autoReceiptEmailSentFor !== orderRef) {
       appRuntime.autoReceiptEmailSentFor = orderRef;
-      window.location.href = emailLink;
-      showCartToast(`📧 Comprobante preparado para envío a ${receiptEmail}`);
+      sendReceiptEmail(orderData, { trigger: 'auto' });
     }
   }
 
@@ -1109,7 +1157,7 @@ function hideReceipt() {
   if (receiptTrackBtn) receiptTrackBtn.style.display = 'none';
   if (receiptEmailBtn) {
     receiptEmailBtn.style.display = 'none';
-    receiptEmailBtn.dataset.mailto = '';
+    receiptEmailBtn.dataset.email = '';
   }
   if (receiptWhatsAppBtn) {
     receiptWhatsAppBtn.style.display = 'none';
@@ -1597,10 +1645,9 @@ function setupCartModalEvents() {
 
   bindScopedListener(scope, document.getElementById('download-receipt-btn'), 'click', () => downloadReceiptPdf(lastOrderData), {}, 'receipt:download');
 
-  bindScopedListener(scope, receiptEmailBtn, 'click', () => {
-    const link = String(receiptEmailBtn?.dataset?.mailto || '');
-    if (!link) return;
-    window.location.href = link;
+  bindScopedListener(scope, receiptEmailBtn, 'click', async () => {
+    if (!lastOrderData) return;
+    await sendReceiptEmail(lastOrderData, { trigger: 'manual' });
   }, {}, 'receipt:email-send');
 
   logListenerStats('cart');
@@ -1850,6 +1897,22 @@ async function submitOrder(eventOrForm) {
 
     if (!orderId) throw new Error('No se pudo obtener order_id desde create_order.');
 
+    const receiptEmail = emailRaw || normalizeEmail(appRuntime.lastAuthEmail || '');
+    const receiptToken = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    if (receiptEmail) {
+      const { error: receiptDataError } = await withTimeout(
+        supabaseClient.rpc('set_order_receipt_data', {
+          p_order_id: orderId,
+          p_email: receiptEmail,
+          p_token: receiptToken
+        }),
+        8000,
+        'No se pudo guardar token de comprobante a tiempo.'
+      );
+      if (receiptDataError) throw receiptDataError;
+    }
+
     lastOrderData = {
       id: orderId,
       short_id: shortId || getShortOrderId(orderId),
@@ -1861,6 +1924,7 @@ async function submitOrder(eventOrForm) {
       referencia: referenciaRaw,
       comentario: comentarioRaw,
       email: emailRaw || appRuntime.lastAuthEmail || '',
+      receipt_token: receiptEmail ? receiptToken : '',
       total: totals.totalFinal,
       created_at: createdAt,
       subtotal: totals.subtotal,
@@ -1878,7 +1942,6 @@ async function submitOrder(eventOrForm) {
     lastOrderCode = lastOrderData.short_code || lastOrderData.short_id;
     saveLastTrackingCode(lastOrderCode);
 
-    const receiptEmail = emailRaw || normalizeEmail(appRuntime.lastAuthEmail || '');
     if (receiptEmail) {
       showFeedback(`✅ Pedido creado (#${lastOrderData.short_id}). Enviaremos boleta/factura al correo ${receiptEmail}.`, 'success');
     } else {
