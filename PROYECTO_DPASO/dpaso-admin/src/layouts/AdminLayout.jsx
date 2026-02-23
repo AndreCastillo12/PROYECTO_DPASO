@@ -106,16 +106,16 @@ export default function AdminLayout() {
             <h2 style={{ textAlign: "center", margin: "12px 0 4px" }}>Admin</h2>
             {displayName && <span style={userNameStyle}>{displayName}</span>}
           </div>
-          <NavLink to="/dashboard" style={linkStyle}>Dashboard</NavLink>
-          <NavLink to="/platos" style={linkStyle}>Gestión de Platos</NavLink>
-          <NavLink to="/categorias" style={linkStyle}>Gestión de Categorías</NavLink>
-          <NavLink to="/pedidos" style={linkStyle}>Pedidos</NavLink>
-          <NavLink to="/clientes" style={linkStyle}>Clientes</NavLink>
-          <NavLink to="/tienda" style={linkStyle}>Horarios de atención</NavLink>
-          <NavLink to="/zonas-delivery" style={linkStyle}>Zonas delivery</NavLink>
-          <NavLink to="/caja" style={linkStyle}>Caja</NavLink>
-          <NavLink to="/reportes" style={linkStyle}>Reportes</NavLink>
-          <NavLink to="/perfil" style={linkStyle}>Perfil</NavLink>
+          <NavLink to="/dashboard" style={({ isActive }) => linkStyle(isActive)}>Dashboard</NavLink>
+          <NavLink to="/platos" style={({ isActive }) => linkStyle(isActive)}>Gestión de Platos</NavLink>
+          <NavLink to="/categorias" style={({ isActive }) => linkStyle(isActive)}>Gestión de Categorías</NavLink>
+          <NavLink to="/pedidos" style={({ isActive }) => linkStyle(isActive)}>Pedidos</NavLink>
+          <NavLink to="/clientes" style={({ isActive }) => linkStyle(isActive)}>Clientes</NavLink>
+          <NavLink to="/tienda" style={({ isActive }) => linkStyle(isActive)}>Horarios de atención</NavLink>
+          <NavLink to="/zonas-delivery" style={({ isActive }) => linkStyle(isActive)}>Zonas delivery</NavLink>
+          <NavLink to="/caja" style={({ isActive }) => linkStyle(isActive)}>Caja</NavLink>
+          <NavLink to="/reportes" style={({ isActive }) => linkStyle(isActive)}>Reportes</NavLink>
+          <NavLink to="/perfil" style={({ isActive }) => linkStyle(isActive)}>Perfil</NavLink>
         </div>
 
         <button onClick={cerrarSesion} style={logoutBtn}>Cerrar Sesión</button>
@@ -167,34 +167,34 @@ export default function AdminLayout() {
                 <span style={userNameStyle}>{displayName || "Usuario"}</span>
               </div>
             </div>
-            <NavLink to="/dashboard" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/dashboard" style={({ isActive }) => linkStyle(isActive)} onClick={() => setMenuOpen(false)}>
               Dashboard
             </NavLink>
-            <NavLink to="/platos" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/platos" style={({ isActive }) => linkStyle(isActive)} onClick={() => setMenuOpen(false)}>
               Gestión de Platos
             </NavLink>
-            <NavLink to="/categorias" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/categorias" style={({ isActive }) => linkStyle(isActive)} onClick={() => setMenuOpen(false)}>
               Gestión de Categorías
             </NavLink>
-            <NavLink to="/pedidos" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/pedidos" style={({ isActive }) => linkStyle(isActive)} onClick={() => setMenuOpen(false)}>
               Pedidos
             </NavLink>
-            <NavLink to="/clientes" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/clientes" style={({ isActive }) => linkStyle(isActive)} onClick={() => setMenuOpen(false)}>
               Clientes
             </NavLink>
-            <NavLink to="/tienda" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/tienda" style={({ isActive }) => linkStyle(isActive)} onClick={() => setMenuOpen(false)}>
               Horarios de atención
             </NavLink>
-            <NavLink to="/zonas-delivery" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/zonas-delivery" style={({ isActive }) => linkStyle(isActive)} onClick={() => setMenuOpen(false)}>
               Zonas delivery
             </NavLink>
-            <NavLink to="/caja" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/caja" style={({ isActive }) => linkStyle(isActive)} onClick={() => setMenuOpen(false)}>
               Caja
             </NavLink>
-            <NavLink to="/reportes" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/reportes" style={({ isActive }) => linkStyle(isActive)} onClick={() => setMenuOpen(false)}>
               Reportes
             </NavLink>
-            <NavLink to="/perfil" style={linkStyle} onClick={() => setMenuOpen(false)}>
+            <NavLink to="/perfil" style={({ isActive }) => linkStyle(isActive)} onClick={() => setMenuOpen(false)}>
               Perfil
             </NavLink>
 
@@ -229,15 +229,19 @@ export default function AdminLayout() {
   );
 }
 
-const linkStyle = {
+const linkStyle = (isActive) => ({
   display: "block",
   margin: "10px 0",
   color: "#fff",
   textDecoration: "none",
-  padding: "6px 10px",
-  borderRadius: "6px",
-  transition: "background 0.2s",
-};
+  padding: "8px 10px",
+  borderRadius: "8px",
+  transition: "all 0.2s",
+  background: isActive ? "linear-gradient(135deg, #2f4f80, #3c5f97)" : "transparent",
+  boxShadow: isActive ? "0 8px 20px rgba(0,0,0,.18)" : "none",
+  border: isActive ? "1px solid rgba(255,255,255,.18)" : "1px solid transparent",
+  fontWeight: isActive ? 700 : 500,
+});
 
 const logoutBtn = {
   width: "100%",
