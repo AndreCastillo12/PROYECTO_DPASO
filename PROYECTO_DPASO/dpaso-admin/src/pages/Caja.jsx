@@ -516,21 +516,21 @@ const cardStyle = {
   background: "#fff",
   borderRadius: 12,
   padding: 14,
-  boxShadow: "0 4px 14px rgba(0,0,0,.06)",
+  boxShadow: "0 8px 24px rgba(17,24,39,.04)",
 };
 const formGrid = {
   display: "grid",
   gap: 10,
 };
 const inputStyle = {
-  border: "1px solid #d1d5db",
+  border: "1px solid #dce7e2",
   borderRadius: 8,
   padding: "9px 10px",
   fontSize: 14,
   background: "#fff",
 };
 const btnPrimary = {
-  background: "#162447",
+  background: "#2fa67f",
   color: "#fff",
   border: "none",
   borderRadius: 8,
@@ -538,9 +538,9 @@ const btnPrimary = {
   cursor: "pointer",
 };
 const btnSecondary = {
-  background: "#f3f4f6",
+  background: "#f3faf7",
   color: "#111827",
-  border: "1px solid #d1d5db",
+  border: "1px solid #dce7e2",
   borderRadius: 8,
   padding: "8px 10px",
   cursor: "pointer",
