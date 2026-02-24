@@ -1,10 +1,49 @@
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  FiBarChart2,
+  FiBox,
+  FiCalendar,
+  FiClock,
+  FiGrid,
+  FiList,
+  FiLogOut,
+  FiMapPin,
+  FiMenu,
+  FiSearch,
+  FiSettings,
+  FiShoppingBag,
+  FiUser,
+  FiUsers,
+  FiX,
+  FiFileText,
+} from "react-icons/fi";
+
 import { supabase } from "../lib/supabaseClient";
+import useIdleLogout, { IDLE_LOGOUT_DEFAULT_MS } from "../hooks/useIdleLogout";
+import "../styles/admin-shell.css";
+
+const NAV_ITEMS = [
+  { to: "/dashboard", label: "Dashboard", icon: FiGrid },
+  { to: "/pedidos", label: "Lista pedidos", icon: FiShoppingBag },
+  { to: "/pedido-detalle", label: "Detalle pedido", icon: FiFileText },
+  { to: "/clientes", label: "Clientes", icon: FiUsers },
+  { to: "/caja", label: "Caja", icon: FiBox },
+  { to: "/reportes", label: "Reportes", icon: FiBarChart2 },
+  { to: "/platos", label: "Platos", icon: FiList },
+  { to: "/categorias", label: "Categorías", icon: FiSettings },
+  { to: "/tienda", label: "Horarios", icon: FiClock },
+  { to: "/zonas-delivery", label: "Zonas", icon: FiMapPin },
+  { to: "/perfil", label: "Perfil", icon: FiUser },
+];
 
 export default function AdminLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const profileMenuRef = useRef(null);
+
   const [menuOpen, setMenuOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [avatarUrl, setAvatarUrl] = useState("");
@@ -28,34 +67,44 @@ export default function AdminLayout() {
         .maybeSingle();
 
       if (!active) return;
-
       setProfile(profileData || null);
 
-      if (profileData?.avatar_path) {
-        const { data: signedData } = await supabase.storage
-          .from("avatars")
-          .createSignedUrl(profileData.avatar_path, 60 * 60);
-
-        if (!active) return;
-
-        if (signedData?.signedUrl) {
-          setAvatarUrl(signedData.signedUrl);
-        } else {
-          const { data: publicData } = supabase.storage
-            .from("avatars")
-            .getPublicUrl(profileData.avatar_path);
-          setAvatarUrl(publicData?.publicUrl || "");
-        }
-      } else {
+      if (!profileData?.avatar_path) {
         setAvatarUrl("");
+        return;
+      }
+
+      const { data: signedData } = await supabase.storage
+        .from("avatars")
+        .createSignedUrl(profileData.avatar_path, 60 * 60);
+
+      if (!active) return;
+
+      if (signedData?.signedUrl) {
+        setAvatarUrl(signedData.signedUrl);
+      } else {
+        const { data: publicData } = supabase.storage
+          .from("avatars")
+          .getPublicUrl(profileData.avatar_path);
+        setAvatarUrl(publicData?.publicUrl || "");
       }
     }
 
     cargarPerfil();
-
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    function onOutside(event) {
+      if (!profileMenuRef.current?.contains(event.target)) {
+        setProfileMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", onOutside);
+    return () => document.removeEventListener("mousedown", onOutside);
   }, []);
 
   const displayName = useMemo(() => {
@@ -64,236 +113,111 @@ export default function AdminLayout() {
     return `${nombre} ${apellidos}`.trim();
   }, [profile?.nombre, profile?.apellidos]);
 
+  const pageTitle = useMemo(() => {
+    const current = NAV_ITEMS.find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`));
+    return current?.label || "Panel admin";
+  }, [location.pathname]);
+
   const cerrarSesion = async () => {
-    // Cierre REAL de sesión Supabase
     await supabase.auth.signOut();
-
-    // Por si lo sigues usando para expiración custom
     localStorage.removeItem("userSession");
-
     setMenuOpen(false);
+    setProfileMenuOpen(false);
     navigate("/login", { replace: true });
   };
 
-  const toggleMenu = () => setMenuOpen(!menuOpen);
+  useIdleLogout({
+    enabled: true,
+    timeoutMs: IDLE_LOGOUT_DEFAULT_MS,
+    onIdleLogout: () => {
+      localStorage.removeItem("userSession");
+      setMenuOpen(false);
+      setProfileMenuOpen(false);
+      navigate("/login", { replace: true });
+    },
+  });
+
+  const openProfile = () => {
+    setProfileMenuOpen(false);
+    navigate("/perfil");
+  };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", flexDirection: "row" }}>
-      {/* NAV FIJO / DESKTOP */}
-      <nav
-        style={{
-          width: "220px",
-          height: "100vh",
-          backgroundColor: "#162447",
-          padding: "20px 10px",
-          color: "#fff",
-          display: "flex",
-          flexDirection: "column",
-        }}
-        className="nav-desktop"
-      >
-        <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: "24px" }}>
-            <div style={avatarWrapperStyle}>
-              {avatarUrl ? (
-                <img src={avatarUrl} alt="Avatar" style={avatarStyle} />
-              ) : (
-                <div style={avatarFallbackStyle}>
-                  {(displayName || user?.email || "A").charAt(0).toUpperCase()}
-                </div>
-              )}
+    <div className="admin-shell">
+      <aside className={`admin-sidebar ${menuOpen ? "is-open" : ""}`}>
+        <div>
+          <div className="admin-brand">
+            <div className="admin-brand-logo">D</div>
+            <div>
+              <h1>DPASO</h1>
+              <p>Panel administrativo</p>
             </div>
-            <h2 style={{ textAlign: "center", margin: "12px 0 4px" }}>Admin</h2>
-            {displayName && <span style={userNameStyle}>{displayName}</span>}
           </div>
-          <NavLink to="/dashboard" style={linkStyle}>Dashboard</NavLink>
-          <NavLink to="/platos" style={linkStyle}>Gestión de Platos</NavLink>
-          <NavLink to="/categorias" style={linkStyle}>Gestión de Categorías</NavLink>
-          <NavLink to="/pedidos" style={linkStyle}>Pedidos</NavLink>
-          <NavLink to="/clientes" style={linkStyle}>Clientes</NavLink>
-          <NavLink to="/tienda" style={linkStyle}>Horarios de atención</NavLink>
-          <NavLink to="/zonas-delivery" style={linkStyle}>Zonas delivery</NavLink>
-          <NavLink to="/caja" style={linkStyle}>Caja</NavLink>
-          <NavLink to="/reportes" style={linkStyle}>Reportes</NavLink>
-          <NavLink to="/perfil" style={linkStyle}>Perfil</NavLink>
+
+          <nav className="admin-nav" aria-label="Navegación principal">
+            {NAV_ITEMS.map((item) => {
+              const IconComponent = item.icon;
+              return (
+                <NavLink key={item.to} to={item.to} className={({ isActive }) => `admin-nav-link ${isActive ? "is-active" : ""}`} onClick={() => setMenuOpen(false)}>
+                  <IconComponent size={16} />
+                  <span>{item.label}</span>
+                </NavLink>
+              );
+            })}
+          </nav>
         </div>
 
-        <button onClick={cerrarSesion} style={logoutBtn}>Cerrar Sesión</button>
-      </nav>
-
-      {/* NAV MÓVIL */}
-      <div className="nav-mobile" style={{ display: "none", position: "relative" }}>
-        <button
-          onClick={toggleMenu}
-          style={{
-            backgroundColor: "#162447",
-            color: "#fff",
-            padding: "10px 15px",
-            border: "none",
-            borderRadius: "6px",
-            margin: "10px",
-            cursor: "pointer",
-          }}
-        >
-          ☰ Menú
+        <button onClick={cerrarSesion} className="admin-logout-btn" type="button">
+          <FiLogOut size={16} /> Cerrar sesión
         </button>
+      </aside>
 
-        {menuOpen && (
-          <div
-            style={{
-              position: "absolute",
-              top: "50px",
-              left: "10px",
-              backgroundColor: "#162447",
-              borderRadius: "8px",
-              padding: "10px",
-              zIndex: 100,
-              width: "200px",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "6px 8px" }}>
-              <div style={avatarWrapperStyleSmall}>
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt="Avatar" style={avatarStyle} />
-                ) : (
-                  <div style={avatarFallbackStyleSmall}>
-                    {(displayName || user?.email || "A").charAt(0).toUpperCase()}
-                  </div>
-                )}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                <span style={userNameStyle}>{displayName || "Usuario"}</span>
-              </div>
-            </div>
-            <NavLink to="/dashboard" style={linkStyle} onClick={() => setMenuOpen(false)}>
-              Dashboard
-            </NavLink>
-            <NavLink to="/platos" style={linkStyle} onClick={() => setMenuOpen(false)}>
-              Gestión de Platos
-            </NavLink>
-            <NavLink to="/categorias" style={linkStyle} onClick={() => setMenuOpen(false)}>
-              Gestión de Categorías
-            </NavLink>
-            <NavLink to="/pedidos" style={linkStyle} onClick={() => setMenuOpen(false)}>
-              Pedidos
-            </NavLink>
-            <NavLink to="/clientes" style={linkStyle} onClick={() => setMenuOpen(false)}>
-              Clientes
-            </NavLink>
-            <NavLink to="/tienda" style={linkStyle} onClick={() => setMenuOpen(false)}>
-              Horarios de atención
-            </NavLink>
-            <NavLink to="/zonas-delivery" style={linkStyle} onClick={() => setMenuOpen(false)}>
-              Zonas delivery
-            </NavLink>
-            <NavLink to="/caja" style={linkStyle} onClick={() => setMenuOpen(false)}>
-              Caja
-            </NavLink>
-            <NavLink to="/reportes" style={linkStyle} onClick={() => setMenuOpen(false)}>
-              Reportes
-            </NavLink>
-            <NavLink to="/perfil" style={linkStyle} onClick={() => setMenuOpen(false)}>
-              Perfil
-            </NavLink>
+      {menuOpen ? <button type="button" aria-label="Cerrar menú" className="admin-backdrop" onClick={() => setMenuOpen(false)} /> : null}
 
-            <button onClick={cerrarSesion} style={{ ...logoutBtn, marginTop: "10px" }}>
-              Cerrar Sesión
+      <section className="admin-content-area">
+        <header className="admin-topbar">
+          <div className="admin-topbar-left">
+            <button className="admin-menu-btn" onClick={() => setMenuOpen((prev) => !prev)} type="button" aria-label="Abrir menú">
+              {menuOpen ? <FiX size={18} /> : <FiMenu size={18} />}
             </button>
+            <div className="admin-search-shell" role="search">
+              <FiSearch size={16} />
+              <input type="search" placeholder="Buscar aquí" aria-label="Buscar" />
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* CONTENIDO */}
-      <main
-        style={{
-          flex: 1,
-          padding: "20px",
-          backgroundColor: "#f4f4f4",
-          overflowY: "auto",
-          height: "100vh",
-        }}
-      >
-        <Outlet />
-      </main>
+          <div className="admin-topbar-right">
+            <button className="admin-icon-btn" type="button" aria-label="Calendario"><FiCalendar size={15} /></button>
+            <button className="admin-icon-btn" type="button" aria-label="Métricas"><FiBarChart2 size={15} /></button>
 
-      {/* RESPONSIVE */}
-      <style>{`
-        @media (max-width: 768px) {
-          .nav-desktop { display: none; }
-          .nav-mobile { display: block; }
-        }
-      `}</style>
+            <div className="admin-profile-menu" ref={profileMenuRef}>
+              <button className="admin-user-pill" type="button" onClick={() => setProfileMenuOpen((prev) => !prev)} aria-expanded={profileMenuOpen}>
+                <div className="admin-avatar-sm">
+                  {avatarUrl ? <img src={avatarUrl} alt="Avatar" /> : <span>{(displayName || user?.email || "A").charAt(0).toUpperCase()}</span>}
+                </div>
+                <div>
+                  <small>Hola</small>
+                  <strong>{displayName || "Admin Dpaso"}</strong>
+                </div>
+              </button>
+
+              {profileMenuOpen ? (
+                <div className="admin-profile-dropdown">
+                  <button type="button" onClick={openProfile}>Editar perfil</button>
+                  <button type="button" onClick={cerrarSesion}>Cerrar sesión</button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </header>
+
+        <main className="admin-page-wrap">
+          <div className="admin-page-header">
+            <h2>{pageTitle}</h2>
+          </div>
+          <Outlet />
+        </main>
+      </section>
     </div>
   );
 }
-
-const linkStyle = {
-  display: "block",
-  margin: "10px 0",
-  color: "#fff",
-  textDecoration: "none",
-  padding: "6px 10px",
-  borderRadius: "6px",
-  transition: "background 0.2s",
-};
-
-const logoutBtn = {
-  width: "100%",
-  backgroundColor: "#d9534f",
-  color: "#fff",
-  border: "none",
-  padding: "8px 0",
-  borderRadius: "6px",
-  cursor: "pointer",
-  marginTop: "20px",
-};
-
-const avatarWrapperStyle = {
-  width: "72px",
-  height: "72px",
-  borderRadius: "50%",
-  overflow: "hidden",
-  border: "2px solid rgba(255,255,255,0.2)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  backgroundColor: "#1f2a44",
-};
-
-const avatarWrapperStyleSmall = {
-  width: "40px",
-  height: "40px",
-  borderRadius: "50%",
-  overflow: "hidden",
-  border: "2px solid rgba(255,255,255,0.2)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  backgroundColor: "#1f2a44",
-};
-
-const avatarStyle = {
-  width: "100%",
-  height: "100%",
-  objectFit: "cover",
-};
-
-const avatarFallbackStyle = {
-  color: "#f3f4f6",
-  fontSize: "28px",
-  fontWeight: 600,
-};
-
-const avatarFallbackStyleSmall = {
-  color: "#f3f4f6",
-  fontSize: "16px",
-  fontWeight: 600,
-};
-
-const userNameStyle = {
-  color: "#e5e7eb",
-  fontSize: "14px",
-  textAlign: "center",
-};
