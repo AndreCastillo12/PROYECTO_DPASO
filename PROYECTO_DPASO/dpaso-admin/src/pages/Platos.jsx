@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { FiEdit2, FiPlus, FiTrash2 } from "react-icons/fi";
 import { supabase } from "../lib/supabaseClient";
 import Sortable from "sortablejs";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import ConfirmModal from "../components/ConfirmModal";
 import LoadingOverlay from "../components/LoadingOverlay";
+import "../styles/platos-sedap.css";
 
 function normalizeStockValue(value) {
   if (value === "" || value == null) return 0;
@@ -294,7 +296,7 @@ export default function Platos() {
   if (loading) return <p>Cargando...</p>;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+    <div className="platos-sedap-page">
       <Toast toast={toast} />
       <LoadingOverlay open={busy} text="Procesando..." />
 
@@ -312,305 +314,97 @@ export default function Platos() {
         danger
       />
 
-      <h2>Gestión de Platos</h2>
+      <section className="platos-sedap-toolbar">
+        <div>
+          <h3>Gestión de platos</h3>
+          <p>Edición, eliminación, alta y control de stock.</p>
+        </div>
+        <button type="button" className="btn-green" onClick={guardarPlato} disabled={busy}>
+          <FiPlus size={15} /> {form.id ? "Guardar cambios" : "Nuevo menú"}
+        </button>
+      </section>
 
-      <div style={formCard}>
-        <input
-          type="text"
-          placeholder="Nombre"
-          value={form.nombre}
-          onChange={(e) => setForm({ ...form, nombre: e.target.value })}
-          style={inputStyle}
-          disabled={busy}
-        />
-
-        <input
-          type="text"
-          placeholder="Descripción"
-          value={form.descripcion}
-          onChange={(e) => setForm({ ...form, descripcion: e.target.value })}
-          style={inputStyle}
-          disabled={busy}
-        />
-
-        <input
-          type="number"
-          placeholder="Precio"
-          value={form.precio}
-          onChange={(e) => setForm({ ...form, precio: e.target.value })}
-          style={{ ...inputStyle, maxWidth: "180px" }}
-          disabled={busy}
-        />
-
-        <select
-          value={form.categoria_id}
-          onChange={(e) => setForm({ ...form, categoria_id: e.target.value })}
-          style={inputStyle}
-          disabled={busy}
-        >
-          <option value="">Selecciona categoría</option>
-          {categorias.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.nombre}
-            </option>
-          ))}
-        </select>
-
-        <label style={checkboxRow}>
-          <input
-            type="checkbox"
-            checked={form.is_available}
-            onChange={(e) => setForm({ ...form, is_available: e.target.checked })}
-            disabled={busy}
-          />
-          Disponible
-        </label>
-
-        <label style={checkboxRow}>
-          <input
-            type="checkbox"
-            checked={form.track_stock}
-            onChange={(e) =>
-              setForm({
-                ...form,
-                track_stock: e.target.checked,
-                stock: e.target.checked ? normalizeStockValue(form.stock) : 0,
-              })
-            }
-            disabled={busy}
-          />
-          Controlar stock
-        </label>
-
-        {form.track_stock && (
-          <input
-            type="number"
-            min="0"
-            placeholder="Stock"
-            value={form.stock}
-            onChange={(e) => setForm({ ...form, stock: e.target.value })}
-            style={{ ...inputStyle, maxWidth: "180px" }}
-            disabled={busy}
-          />
-        )}
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          disabled={busy}
-          onChange={(e) => {
+      <section className="platos-editor-card">
+        <h4>{form.id ? "Editar plato" : "Crear plato"}</h4>
+        <div className="platos-editor-grid">
+          <input type="text" placeholder="Nombre" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} disabled={busy} />
+          <input type="number" placeholder="Precio" value={form.precio} onChange={(e) => setForm({ ...form, precio: e.target.value })} disabled={busy} />
+          <select value={form.categoria_id} onChange={(e) => setForm({ ...form, categoria_id: e.target.value })} disabled={busy}>
+            <option value="">Selecciona categoría</option>
+            {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+          <input type="text" placeholder="Descripción" value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} disabled={busy} />
+          <label className="check-row"><input type="checkbox" checked={form.is_available} onChange={(e) => setForm({ ...form, is_available: e.target.checked })} disabled={busy} /> Disponible</label>
+          <label className="check-row"><input type="checkbox" checked={form.track_stock} onChange={(e) => setForm({ ...form, track_stock: e.target.checked, stock: e.target.checked ? normalizeStockValue(form.stock) : 0 })} disabled={busy} /> Controlar stock</label>
+          {form.track_stock ? <input type="number" min="0" placeholder="Stock" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} disabled={busy} /> : null}
+          <input ref={fileInputRef} type="file" disabled={busy} onChange={(e) => {
             const file = e.target.files?.[0];
             if (!file) return;
             setForm({ ...form, imagen: file, imagenUrl: URL.createObjectURL(file) });
-          }}
-        />
-
-        {form.imagenUrl && <img src={form.imagenUrl} alt="Preview" style={previewImg} />}
-
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-          <button onClick={guardarPlato} style={btnGreen} disabled={busy}>
-            {busy ? "Procesando..." : form.id ? "Guardar Cambios" : "Agregar"}
-          </button>
-
-          <button onClick={cancelarCambios} style={btnGray} disabled={busy}>
-            Cancelar
-          </button>
+          }} />
+          {form.imagenUrl ? <img src={form.imagenUrl} alt="Preview" className="img-preview" /> : null}
         </div>
-      </div>
+        <div className="editor-actions">
+          <button type="button" className="btn-green" onClick={guardarPlato} disabled={busy}>{busy ? "Procesando..." : form.id ? "Guardar cambios" : "Agregar"}</button>
+          <button type="button" className="btn-gray" onClick={cancelarCambios} disabled={busy}>Cancelar</button>
+        </div>
+      </section>
 
       {categorias.map((cat) => (
-        <div key={cat.id} style={{ marginBottom: "30px" }}>
-          <h3 style={{ marginBottom: "10px" }}>{cat.nombre}</h3>
+        <section key={cat.id} className="platos-category-block">
+          <div className="category-head">
+            <h4>{cat.nombre}</h4>
+            <small>Arrastra para reordenar</small>
+          </div>
 
           <div
             ref={(el) => {
               if (el) listRefs.current[cat.id] = el;
             }}
             data-categoria-id={cat.id}
-            style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}
+            className="platos-grid-sedap"
           >
             {platos
               .filter((p) => p.categoria_id === cat.id)
               .map((p) => (
-                <div key={p.id} data-plato-id={p.id} className="card" style={cardStyle}>
-                  {p.imagen && (
-                    <img src={supabase.storage.from("platos").getPublicUrl(p.imagen).data.publicUrl} alt={p.nombre} style={cardImgStyle} />
-                  )}
+                <article key={p.id} data-plato-id={p.id} className="plato-card-sedap">
+                  {p.imagen ? <img src={supabase.storage.from("platos").getPublicUrl(p.imagen).data.publicUrl} alt={p.nombre} className="plato-cover" /> : <div className="plato-cover placeholder">Sin imagen</div>}
+                  <h5>{p.nombre}</h5>
+                  <p className="description">{p.descripcion || "Sin descripción"}</p>
+                  <p className="price">S/ {Number(p.precio).toFixed(2)}</p>
+                  <div className="status-row">
+                    <span className={`badge ${p.is_available ? "ok" : "off"}`}>{p.is_available ? "Disponible" : "No disponible"}</span>
+                    <span className="badge neutral">{p.track_stock ? `Stock ${p.stock ?? 0}` : "Stock ilimitado"}</span>
+                  </div>
 
-                  <h4 style={{ margin: "6px 0" }}>{p.nombre}</h4>
-                  <p style={{ margin: "4px 0" }}>{p.descripcion}</p>
-                  <p style={{ fontWeight: "bold", marginTop: "4px" }}>S/ {Number(p.precio).toFixed(2)}</p>
-
-                  <p style={{ margin: "4px 0", fontWeight: 600 }}>
-                    {p.is_available ? "Disponible" : "No disponible"}
-                  </p>
-                  <p style={{ margin: "4px 0", color: "#475467" }}>
-                    {p.track_stock ? `Stock: ${p.stock ?? 0}` : "Stock: ∞ (Ilimitado)"}
-                  </p>
-
-                  <div style={quickInventoryRow}>
-                    <label style={checkboxSmall}>
-                      <input
-                        type="checkbox"
-                        checked={p.is_available ?? true}
-                        disabled={busy}
-                        onChange={(e) =>
-                          actualizarInventarioRapido(p.id, {
-                            is_available: e.target.checked,
-                          })
-                        }
-                      />
-                      Disponible
-                    </label>
-
-                    <label style={checkboxSmall}>
-                      <input
-                        type="checkbox"
-                        checked={p.track_stock ?? false}
-                        disabled={busy}
-                        onChange={(e) =>
-                          actualizarInventarioRapido(p.id, {
-                            track_stock: e.target.checked,
-                            stock: e.target.checked ? p.stock ?? 0 : null,
-                          })
-                        }
-                      />
-                      Controlar stock
-                    </label>
-
-                    {p.track_stock && (
+                  <div className="quick-stock">
+                    <label><input type="checkbox" checked={p.is_available ?? true} disabled={busy} onChange={(e) => actualizarInventarioRapido(p.id, { is_available: e.target.checked })} /> Disponible</label>
+                    <label><input type="checkbox" checked={p.track_stock ?? false} disabled={busy} onChange={(e) => actualizarInventarioRapido(p.id, { track_stock: e.target.checked, stock: e.target.checked ? p.stock ?? 0 : null })} /> Controlar stock</label>
+                    {p.track_stock ? (
                       <input
                         type="number"
                         min="0"
                         value={p.stock ?? 0}
                         disabled={busy}
-                        style={{ ...inputStyle, padding: "8px", fontSize: "0.85rem" }}
                         onChange={(e) =>
                           setPlatos((prev) =>
-                            prev.map((item) =>
-                              item.id === p.id ? { ...item, stock: normalizeStockValue(e.target.value) } : item
-                            )
+                            prev.map((item) => (item.id === p.id ? { ...item, stock: normalizeStockValue(e.target.value) } : item))
                           )
                         }
-                        onBlur={() =>
-                          actualizarInventarioRapido(p.id, {
-                            stock: p.stock ?? 0,
-                            track_stock: true,
-                          })
-                        }
+                        onBlur={() => actualizarInventarioRapido(p.id, { stock: p.stock ?? 0, track_stock: true })}
                       />
-                    )}
+                    ) : null}
                   </div>
 
-                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px" }}>
-                    <button onClick={() => abrirEditar(p)} style={{ ...btnSmall, backgroundColor: "#f0ad4e" }} disabled={busy}>
-                      Editar
-                    </button>
-
-                    <button onClick={() => pedirEliminarPlato(p)} style={{ ...btnSmall, backgroundColor: "#d9534f" }} disabled={busy}>
-                      Eliminar
-                    </button>
+                  <div className="card-actions">
+                    <button type="button" onClick={() => abrirEditar(p)} disabled={busy}><FiEdit2 size={14} /> Editar</button>
+                    <button type="button" onClick={() => pedirEliminarPlato(p)} disabled={busy}><FiTrash2 size={14} /> Eliminar</button>
                   </div>
-                </div>
+                </article>
               ))}
           </div>
-        </div>
+        </section>
       ))}
     </div>
   );
 }
-
-const formCard = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "12px",
-  padding: "35px",
-  borderRadius: "12px",
-  backgroundColor: "#fff",
-  boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-  maxWidth: "700px",
-  width: "100%",
-};
-
-const inputStyle = {
-  padding: "10px",
-  borderRadius: "6px",
-  border: "1px solid #ccc",
-  width: "100%",
-};
-
-const checkboxRow = {
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  fontWeight: 600,
-};
-
-const checkboxSmall = {
-  display: "flex",
-  alignItems: "center",
-  gap: "6px",
-  fontSize: "0.85rem",
-};
-
-const previewImg = {
-  width: "200px",
-  borderRadius: "6px",
-  objectFit: "cover",
-};
-
-const btnGreen = {
-  backgroundColor: "#178d42",
-  color: "#fff",
-  border: "none",
-  padding: "10px 14px",
-  borderRadius: "6px",
-  cursor: "pointer",
-  fontWeight: 600,
-};
-
-const btnGray = {
-  backgroundColor: "#6c757d",
-  color: "#fff",
-  border: "none",
-  padding: "10px 14px",
-  borderRadius: "6px",
-  cursor: "pointer",
-  fontWeight: 600,
-};
-
-const btnSmall = {
-  color: "#fff",
-  border: "none",
-  padding: "6px 10px",
-  borderRadius: "6px",
-  cursor: "pointer",
-  fontSize: "0.9rem",
-  fontWeight: 600,
-};
-
-const cardStyle = {
-  borderRadius: "10px",
-  boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-  padding: "12px",
-  width: "260px",
-  backgroundColor: "#fff",
-  display: "flex",
-  flexDirection: "column",
-  cursor: "grab",
-};
-
-const cardImgStyle = {
-  width: "100%",
-  height: "140px",
-  objectFit: "cover",
-  borderRadius: "6px",
-  marginBottom: "8px",
-};
-
-const quickInventoryRow = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "6px",
-  marginTop: "8px",
-};

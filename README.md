@@ -27,3 +27,11 @@ Se agregó una entidad `customers` para normalizar clientes por teléfono y vinc
 ### Seguridad
 - `customers` protegido con RLS para `admin` autenticado (`public.is_admin_user(auth.uid())`).
 - No se abre lectura pública de clientes en la carta.
+
+## Convención de reporte de cambios (agentes)
+
+En toda actualización de sprint o entrega técnica, reportar explícitamente uno de estos estados:
+- **SQL: Sí hubo cambios** (indicando los archivos `.sql` modificados).
+- **SQL: No hubo cambios**.
+
+Esto aplica incluso si la actualización fue solo de frontend o documentación.
