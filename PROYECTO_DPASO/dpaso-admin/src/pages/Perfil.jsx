@@ -453,7 +453,7 @@ const pendingStyle = {
 
 const resendButtonStyle = {
   backgroundColor: "transparent",
-  border: "1px solid #d1d5db",
+  border: "1px solid #dce7e2",
   borderRadius: "999px",
   padding: "4px 10px",
   fontSize: "12px",
