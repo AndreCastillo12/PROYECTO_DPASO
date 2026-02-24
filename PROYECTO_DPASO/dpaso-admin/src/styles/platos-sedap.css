@@ -1,0 +1,111 @@
+.platos-sedap-page { display: grid; gap: 14px; }
+
+.platos-sedap-toolbar,
+.platos-editor-card,
+.platos-category-block {
+  background: #fff;
+  border: 1px solid #e8e9ee;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(17, 24, 39, 0.04);
+}
+
+.platos-sedap-toolbar {
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.platos-sedap-toolbar h3 { margin: 0; font-size: 18px; }
+.platos-sedap-toolbar p { margin: 4px 0 0; color: #8a92a5; font-size: 13px; }
+
+.btn-green,
+.btn-gray {
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: #fff;
+  font-size: 13px;
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+}
+.btn-green { background: #34b389; }
+.btn-gray { background: #7f8797; }
+
+.platos-editor-card { padding: 14px; }
+.platos-editor-card h4 { margin: 0 0 10px; }
+.platos-editor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.platos-editor-grid input,
+.platos-editor-grid select {
+  border: 1px solid #e2e6ef;
+  border-radius: 10px;
+  font-size: 13px;
+  padding: 9px 10px;
+  margin: 0;
+}
+.check-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #4b5569; }
+.img-preview { width: 120px; height: 80px; object-fit: cover; border-radius: 8px; border: 1px solid #dbe1ee; }
+.editor-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+.platos-category-block { padding: 12px; }
+.category-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.category-head h4 { margin: 0; }
+.category-head small { color: #8f97aa; }
+
+.platos-grid-sedap { display: grid; grid-template-columns: repeat(auto-fill, minmax(225px, 1fr)); gap: 12px; }
+
+.plato-card-sedap {
+  border: 1px solid #ebedf4;
+  border-radius: 14px;
+  padding: 10px;
+  background: #fff;
+  display: grid;
+  gap: 6px;
+  cursor: grab;
+}
+.plato-card-sedap h5 { margin: 0; font-size: 14px; color: #283248; }
+.description { margin: 0; color: #8791a4; font-size: 12px; min-height: 30px; }
+.price { margin: 0; font-weight: 700; color: #2a3349; }
+
+.plato-cover { width: 100%; aspect-ratio: 16/10; object-fit: cover; border-radius: 10px; border: 1px solid #ebedf4; }
+.plato-cover.placeholder { display: grid; place-items: center; color: #98a0b3; background: #f7f9fd; font-size: 12px; }
+
+.status-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.badge { border-radius: 999px; padding: 3px 8px; font-size: 11px; }
+.badge.ok { background: #e8faf3; color: #238b68; }
+.badge.off { background: #ffecee; color: #b8434f; }
+.badge.neutral { background: #f0f4fb; color: #5b667c; }
+
+.quick-stock { display: grid; gap: 6px; }
+.quick-stock label { font-size: 12px; color: #5f6a81; display: flex; align-items: center; gap: 6px; }
+.quick-stock input[type="number"] {
+  border: 1px solid #dfe4ef;
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.card-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.card-actions button {
+  border: 1px solid #e5e9f2;
+  border-radius: 9px;
+  background: #f9fbff;
+  color: #5f6c86;
+  font-size: 11px;
+  padding: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.card-actions button:hover { background: #edf7f3; color: #2b9f7d; }
+
+@media (max-width: 1024px) {
+  .platos-editor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .platos-sedap-toolbar { flex-direction: column; align-items: flex-start; }
+  .platos-editor-grid { grid-template-columns: 1fr; }
+}
