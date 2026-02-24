@@ -120,6 +120,7 @@ declare
   v_item_subtotal numeric;
   v_items_subtotal_calc numeric := 0;
   v_has_zone boolean := false;
+  v_for_other boolean := false;
 
   v_plato_nombre_actual text;
   v_plato_available boolean;
@@ -155,6 +156,7 @@ begin
   v_referencia := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'referencia', '')), '');
   v_provincia := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'provincia', '')), '');
   v_distrito := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'distrito', '')), '');
+  v_for_other := lower(coalesce(v_customer ->> 'for_other', 'false')) in ('true', '1', 't', 'yes', 'y', 'on');
 
   if v_name = '' then
     raise exception 'customer.name es obligatorio';
@@ -221,26 +223,78 @@ begin
 
   v_uid := auth.uid();
 
-  insert into public.customers(name, phone, normalized_phone, user_id)
-  values (
-    v_name,
-    v_phone,
-    nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
-    v_uid
-  )
-  on conflict (phone) do update
-    set name = excluded.name,
-        normalized_phone = excluded.normalized_phone,
-        user_id = case
-          when public.customers.user_id is null and excluded.user_id is not null then excluded.user_id
-          else public.customers.user_id
-        end,
-        updated_at = now()
-  returning id, user_id into v_customer_id, v_customer_user_id;
+  if not v_for_other and v_uid is not null then
+    select c.id, c.user_id
+      into v_customer_id, v_customer_user_id
+    from public.customers c
+    where c.user_id = v_uid
+    order by c.updated_at desc nulls last
+    limit 1
+    for update;
 
-  if v_uid is not null and v_customer_user_id is not null and v_customer_user_id <> v_uid then
-    raise exception 'PHONE_ALREADY_LINKED';
+    if found then
+      begin
+        update public.customers c
+        set
+          name = v_name,
+          phone = v_phone,
+          normalized_phone = nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
+          updated_at = now()
+        where c.id = v_customer_id
+        returning c.id, c.user_id into v_customer_id, v_customer_user_id;
+      exception when unique_violation then
+        insert into public.customers(name, phone, normalized_phone, user_id)
+        values (
+          v_name,
+          v_phone,
+          nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
+          v_uid
+        )
+        on conflict (phone) do update
+          set name = excluded.name,
+              normalized_phone = excluded.normalized_phone,
+              user_id = case
+                when public.customers.user_id is null and excluded.user_id is not null then excluded.user_id
+                else public.customers.user_id
+              end,
+              updated_at = now()
+        returning id, user_id into v_customer_id, v_customer_user_id;
+      end;
+    else
+      insert into public.customers(name, phone, normalized_phone, user_id)
+      values (
+        v_name,
+        v_phone,
+        nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
+        v_uid
+      )
+      on conflict (phone) do update
+        set name = excluded.name,
+            normalized_phone = excluded.normalized_phone,
+            user_id = case
+              when public.customers.user_id is null and excluded.user_id is not null then excluded.user_id
+              else public.customers.user_id
+            end,
+            updated_at = now()
+      returning id, user_id into v_customer_id, v_customer_user_id;
+    end if;
+  else
+    insert into public.customers(name, phone, normalized_phone, user_id)
+    values (
+      v_name,
+      v_phone,
+      nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
+      null
+    )
+    on conflict (phone) do update
+      set name = excluded.name,
+          normalized_phone = excluded.normalized_phone,
+          updated_at = now()
+    returning id, user_id into v_customer_id, v_customer_user_id;
   end if;
+
+  -- Permitir pedidos para terceros con otro teléfono aun con sesión iniciada.
+  -- Conservamos la relación previa del customer, pero no bloqueamos la orden.
 
   insert into public.orders (
     nombre_cliente,

@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { logCriticalEvent } from "../lib/observability";
+import { IDLE_LOGOUT_SESSION_FLAG } from "../hooks/useIdleLogout";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -17,6 +18,13 @@ export default function Login() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
+
+  useEffect(() => {
+    const idleLogout = sessionStorage.getItem(IDLE_LOGOUT_SESSION_FLAG) === "1";
+    if (!idleLogout) return;
+    sessionStorage.removeItem(IDLE_LOGOUT_SESSION_FLAG);
+    showToast("Sesión cerrada por inactividad", "info");
+  }, []);
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -120,7 +128,7 @@ function Toast({ msg, type }) {
       right: 20,
       padding: "12px 18px",
       borderRadius: "8px",
-      backgroundColor: type === "error" ? "#dc3545" : "#28a745",
+      backgroundColor: type === "error" ? "#dc3545" : type === "info" ? "#1f4e79" : "#28a745",
       color: "#fff",
       boxShadow: "0 4px 10px rgba(0,0,0,.2)",
       zIndex: 999
