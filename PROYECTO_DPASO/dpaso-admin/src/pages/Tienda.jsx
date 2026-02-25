@@ -114,7 +114,7 @@ export default function Tienda() {
 
       <div style={cardStyle}>
         <label style={switchRow}>
-          <span style={{ fontWeight: 600, color: "#162447" }}>Tienda abierta</span>
+          <span style={{ fontWeight: 600, color: "#2fa67f" }}>Tienda abierta</span>
           <input type="checkbox" checked={Boolean(form.is_open)} onChange={(e) => updateField("is_open", e.target.checked)} />
         </label>
 
@@ -143,9 +143,9 @@ export default function Tienda() {
   );
 }
 
-const cardStyle = { background: "#fff", borderRadius: 12, padding: 16, display: "grid", gap: 12, boxShadow: "0 4px 14px rgba(0,0,0,.06)" };
+const cardStyle = { background: "#fff", borderRadius: 12, padding: 16, display: "grid", gap: 12, boxShadow: "0 8px 24px rgba(17,24,39,.04)" };
 const fieldWrap = { display: "grid", gap: 6, color: "#1f2937", fontSize: 14 };
 const grid2 = { display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" };
 const switchRow = { display: "flex", justifyContent: "space-between", alignItems: "center" };
-const inputStyle = { border: "1px solid #d1d5db", borderRadius: 8, padding: "9px 10px", fontSize: 14 };
-const saveBtn = { border: "none", borderRadius: 8, background: "#1f4068", color: "#fff", padding: "10px 12px", cursor: "pointer", fontWeight: 600 };
+const inputStyle = { border: "1px solid #dce7e2", borderRadius: 8, padding: "9px 10px", fontSize: 14 };
+const saveBtn = { border: "none", borderRadius: 8, background: "#2fa67f", color: "#fff", padding: "10px 12px", cursor: "pointer", fontWeight: 600 };
