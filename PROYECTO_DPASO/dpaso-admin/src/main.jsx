@@ -7,6 +7,7 @@ import Platos from "./pages/Platos";
 import Categorias from "./pages/Categorias";
 import Perfil from "./pages/Perfil";
 import Pedidos from "./pages/Pedidos";
+import OrderDetail from "./pages/OrderDetail";
 import Tienda from "./pages/Tienda";
 import ZonasDelivery from "./pages/ZonasDelivery";
 import Caja from "./pages/Caja";
@@ -34,6 +35,7 @@ const router = createBrowserRouter([
       { path: "categorias", element: <Categorias /> }, // /categorias
       { path: "perfil", element: <Perfil /> }, // /perfil
       { path: "pedidos", element: <Pedidos /> }, // /pedidos
+      { path: "pedido-detalle", element: <OrderDetail /> }, // /pedido-detalle
       { path: "tienda", element: <Tienda /> }, // /tienda
       { path: "zonas-delivery", element: <ZonasDelivery /> }, // /zonas-delivery
       { path: "caja", element: <Caja /> }, // /caja
