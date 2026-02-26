@@ -141,8 +141,12 @@ export default function Salon() {
   const openTicketByTable = useMemo(() => {
     const map = new Map();
     tickets.forEach((t) => {
-      const isReleased = t.status === "cancelled" || (t.status === "closed" && t.payment_status === "paid");
-      if (!isReleased) map.set(t.table_id, t);
+      const normalizedStatus = String(t.status || "").toLowerCase();
+      const isReleased = ["cancelled", "closed"].includes(normalizedStatus);
+      if (isReleased || !t.table_id) return;
+      if (!map.has(t.table_id)) {
+        map.set(t.table_id, t);
+      }
     });
     return map;
   }, [tickets]);
@@ -173,6 +177,11 @@ export default function Salon() {
     setSelectedTable(table);
     setSelectedTicket(openTicketByTable.get(table.id) || null);
   }
+
+  useEffect(() => {
+    if (!selectedTable?.id) return;
+    setSelectedTicket(openTicketByTable.get(selectedTable.id) || null);
+  }, [openTicketByTable, selectedTable?.id]);
 
   async function createTable() {
     const name = String(newTableName || "").trim();

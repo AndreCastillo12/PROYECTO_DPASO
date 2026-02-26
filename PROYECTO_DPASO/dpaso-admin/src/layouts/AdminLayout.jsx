@@ -48,7 +48,7 @@ export default function AdminLayout() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [avatarUrl, setAvatarUrl] = useState("");
-  const { canAccess, loadingRole } = useAdminRole();
+  const { canAccess, loadingRole, role } = useAdminRole();
 
   useEffect(() => {
     let active = true;
@@ -199,7 +199,7 @@ export default function AdminLayout() {
 
               {profileMenuOpen ? (
                 <div className="admin-profile-dropdown">
-                  <button type="button" onClick={openProfile}>Editar perfil</button>
+                  {role === "admin" ? <button type="button" onClick={openProfile}>Editar perfil</button> : null}
                   <button type="button" onClick={cerrarSesion}>Cerrar sesión</button>
                 </div>
               ) : null}
