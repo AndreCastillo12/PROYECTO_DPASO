@@ -1,0 +1,95 @@
+.sedap-dashboard { display: grid; gap: 12px; }
+.sedap-dash-head,
+.sedap-card,
+.sedap-kpis-grid article {
+  background: #fff;
+  border: 1px solid #e7ebf2;
+  border-radius: 14px;
+  box-shadow: 0 10px 22px rgba(18, 29, 52, 0.04);
+}
+
+.sedap-dash-head { padding: 14px; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.sedap-dash-head h3 { margin: 0; font-size: 34px; color: #26324b; }
+.sedap-dash-head p { margin: 4px 0 0; font-size: 12px; color: #8b93a7; }
+
+.sedap-toolbar-actions { display: flex; gap: 8px; }
+.sedap-toolbar-actions select,
+.sedap-toolbar-actions button,
+.sedap-card-head select {
+  border: 1px solid #dfe4ef;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 12px;
+  padding: 8px 10px;
+}
+.sedap-toolbar-actions button { background: #34b389; color: #fff; border-color: #34b389; font-weight: 700; }
+
+.sedap-kpis-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.sedap-kpis-grid article { padding: 12px; display: grid; gap: 3px; }
+.kpi-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #e6f8f2;
+  color: #299f7a;
+  margin-bottom: 4px;
+}
+.sedap-kpis-grid small { color: #8d95a8; font-size: 12px; }
+.sedap-kpis-grid strong { color: #2c3851; font-size: 29px; }
+
+.sedap-analytics-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 10px; }
+.sedap-card { padding: 12px; }
+.sedap-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.sedap-card-head h4 { margin: 0; font-size: 22px; color: #303d57; }
+.sedap-card-head a { font-size: 12px; color: #3d86d9; text-decoration: none; }
+
+.pie-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pie-item { display: grid; justify-items: center; gap: 5px; }
+.donut {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+.donut span {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: #4f5b74;
+}
+.pie-item small { font-size: 12px; color: #7d879c; }
+
+.line-wrap { border: 1px solid #ecf0f7; border-radius: 12px; background: #fafcff; min-height: 224px; padding: 6px; overflow: auto; }
+.line-wrap svg { width: 100%; min-width: 640px; }
+
+.sedap-main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sedap-row { display: flex; justify-content: space-between; border-bottom: 1px solid #eff3f9; padding: 7px 0; font-size: 12px; }
+.sedap-row:last-child { border-bottom: 0; }
+.sedap-empty { margin: 0; color: #97a0b1; font-size: 12px; }
+
+.sedap-table-scroll { overflow: auto; }
+.sedap-table { width: 100%; border-collapse: collapse; min-width: 760px; }
+.sedap-table th, .sedap-table td { text-align: left; border-bottom: 1px solid #eff2f8; padding: 8px 8px; font-size: 12px; }
+.sedap-table th { color: #7f8798; font-weight: 600; }
+.sedap-badge { background: #eef9f6; color: #239575; border-radius: 999px; padding: 3px 9px; font-size: 11px; }
+
+@media (max-width: 1100px) {
+  .sedap-kpis-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sedap-analytics-grid,
+  .sedap-main-grid { grid-template-columns: 1fr; }
+  .pie-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .sedap-dash-head { flex-direction: column; align-items: stretch; }
+  .sedap-toolbar-actions { flex-wrap: wrap; }
+  .sedap-kpis-grid { grid-template-columns: 1fr; }
+  .pie-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

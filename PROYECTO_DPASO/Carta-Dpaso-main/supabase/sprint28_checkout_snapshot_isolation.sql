@@ -1,87 +1,40 @@
--- Sprint 9: RPC transaccional para crear pedidos
--- Objetivo: insertar orders + order_items de forma atómica (una sola llamada RPC)
-
-create extension if not exists pgcrypto;
-
--- ---------------------------------------------------------------------------
--- Compatibilidad de columnas para totals y zona (idempotente)
--- ---------------------------------------------------------------------------
-alter table if exists public.orders
-  add column if not exists subtotal numeric(10,2) not null default 0,
-  add column if not exists delivery_fee numeric(10,2) not null default 0,
-  add column if not exists provincia text,
-  add column if not exists distrito text;
+-- Sprint 28: checkout como snapshot aislado (sin mutar customers/perfil por defecto)
 
 alter table if exists public.orders
-  alter column estado set default 'pending';
+  add column if not exists delivery_name text,
+  add column if not exists delivery_phone text,
+  add column if not exists delivery_address text,
+  add column if not exists delivery_reference text,
+  add column if not exists delivery_comment text,
+  add column if not exists delivery_provincia text,
+  add column if not exists delivery_distrito text;
 
-alter table if exists public.orders
-  add column if not exists short_code text;
+update public.orders
+set
+  delivery_name = coalesce(nullif(delivery_name, ''), nombre_cliente),
+  delivery_phone = coalesce(nullif(delivery_phone, ''), telefono),
+  delivery_address = coalesce(nullif(delivery_address, ''), direccion),
+  delivery_reference = coalesce(nullif(delivery_reference, ''), referencia),
+  delivery_comment = coalesce(nullif(delivery_comment, ''), comentario),
+  delivery_provincia = coalesce(nullif(delivery_provincia, ''), provincia),
+  delivery_distrito = coalesce(nullif(delivery_distrito, ''), distrito)
+where delivery_name is null
+   or delivery_phone is null
+   or delivery_address is null
+   or delivery_reference is null
+   or delivery_comment is null
+   or delivery_provincia is null
+   or delivery_distrito is null;
 
-create unique index if not exists orders_short_code_uidx on public.orders(short_code);
+comment on column public.orders.delivery_name is 'Snapshot de nombre de entrega al momento del checkout';
+comment on column public.orders.delivery_phone is 'Snapshot de teléfono de entrega al momento del checkout';
+comment on column public.orders.delivery_address is 'Snapshot de dirección de entrega al momento del checkout';
+comment on column public.orders.delivery_reference is 'Snapshot de referencia de entrega al momento del checkout';
+comment on column public.orders.delivery_comment is 'Snapshot de comentario al momento del checkout';
+comment on column public.orders.delivery_provincia is 'Snapshot de provincia al momento del checkout';
+comment on column public.orders.delivery_distrito is 'Snapshot de distrito al momento del checkout';
 
-create table if not exists public.customers (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  phone text not null,
-  normalized_phone text,
-  total_orders integer not null default 0,
-  total_spent numeric(12,2) not null default 0,
-  last_order_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create unique index if not exists customers_phone_uidx on public.customers(phone);
-
-alter table if exists public.customers
-  add column if not exists user_id uuid references auth.users(id);
-
-alter table if exists public.orders
-  add column if not exists customer_id uuid references public.customers(id),
-  add column if not exists user_id uuid references auth.users(id);
-
-create index if not exists orders_customer_id_idx on public.orders(customer_id);
-
-do $$
-begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'orders_subtotal_check'
-      and conrelid = 'public.orders'::regclass
-  ) then
-    alter table public.orders
-      add constraint orders_subtotal_check
-      check (subtotal >= 0);
-  end if;
-
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'orders_delivery_fee_check'
-      and conrelid = 'public.orders'::regclass
-  ) then
-    alter table public.orders
-      add constraint orders_delivery_fee_check
-      check (delivery_fee >= 0);
-  end if;
-end $$;
-
-comment on column public.orders.subtotal is 'Subtotal de items al momento de crear el pedido';
-comment on column public.orders.delivery_fee is 'Costo de delivery al momento de crear el pedido';
-comment on column public.orders.provincia is 'Provincia de entrega para modalidad Delivery';
-comment on column public.orders.distrito is 'Distrito de entrega para modalidad Delivery';
-
--- ---------------------------------------------------------------------------
--- RPC transaccional
--- ---------------------------------------------------------------------------
--- Diagnóstico recomendado en SQL Editor (manual):
--- select pg_get_functiondef('public.create_order(jsonb)'::regprocedure);
--- select column_name from information_schema.columns where table_schema='public' and table_name='orders' order by ordinal_position;
--- select column_name from information_schema.columns where table_schema='public' and table_name='order_items' order by ordinal_position;
 drop function if exists public.create_order(jsonb);
-
 create or replace function public.create_order(payload jsonb)
 returns jsonb
 language plpgsql
@@ -106,8 +59,6 @@ declare
   v_total numeric;
 
   v_order_id uuid;
-  v_customer_id uuid;
-  v_customer_user_id uuid;
   v_uid uuid;
   v_short_id text;
   v_created_at timestamptz;
@@ -120,7 +71,6 @@ declare
   v_item_subtotal numeric;
   v_items_subtotal_calc numeric := 0;
   v_has_zone boolean := false;
-  v_for_other boolean := false;
 
   v_plato_nombre_actual text;
   v_plato_available boolean;
@@ -156,7 +106,6 @@ begin
   v_referencia := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'referencia', '')), '');
   v_provincia := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'provincia', '')), '');
   v_distrito := nullif(pg_catalog.btrim(coalesce(v_customer ->> 'distrito', '')), '');
-  v_for_other := lower(coalesce(v_customer ->> 'for_other', 'false')) in ('true', '1', 't', 'yes', 'y', 'on');
 
   if v_name = '' then
     raise exception 'customer.name es obligatorio';
@@ -223,79 +172,6 @@ begin
 
   v_uid := auth.uid();
 
-  if not v_for_other and v_uid is not null then
-    select c.id, c.user_id
-      into v_customer_id, v_customer_user_id
-    from public.customers c
-    where c.user_id = v_uid
-    order by c.updated_at desc nulls last
-    limit 1
-    for update;
-
-    if found then
-      begin
-        update public.customers c
-        set
-          name = v_name,
-          phone = v_phone,
-          normalized_phone = nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
-          updated_at = now()
-        where c.id = v_customer_id
-        returning c.id, c.user_id into v_customer_id, v_customer_user_id;
-      exception when unique_violation then
-        insert into public.customers(name, phone, normalized_phone, user_id)
-        values (
-          v_name,
-          v_phone,
-          nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
-          v_uid
-        )
-        on conflict (phone) do update
-          set name = excluded.name,
-              normalized_phone = excluded.normalized_phone,
-              user_id = case
-                when public.customers.user_id is null and excluded.user_id is not null then excluded.user_id
-                else public.customers.user_id
-              end,
-              updated_at = now()
-        returning id, user_id into v_customer_id, v_customer_user_id;
-      end;
-    else
-      insert into public.customers(name, phone, normalized_phone, user_id)
-      values (
-        v_name,
-        v_phone,
-        nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
-        v_uid
-      )
-      on conflict (phone) do update
-        set name = excluded.name,
-            normalized_phone = excluded.normalized_phone,
-            user_id = case
-              when public.customers.user_id is null and excluded.user_id is not null then excluded.user_id
-              else public.customers.user_id
-            end,
-            updated_at = now()
-      returning id, user_id into v_customer_id, v_customer_user_id;
-    end if;
-  else
-    insert into public.customers(name, phone, normalized_phone, user_id)
-    values (
-      v_name,
-      v_phone,
-      nullif(pg_catalog.regexp_replace(v_phone, '[^0-9]+', '', 'g'), ''),
-      null
-    )
-    on conflict (phone) do update
-      set name = excluded.name,
-          normalized_phone = excluded.normalized_phone,
-          updated_at = now()
-    returning id, user_id into v_customer_id, v_customer_user_id;
-  end if;
-
-  -- Permitir pedidos para terceros con otro teléfono aun con sesión iniciada.
-  -- Conservamos la relación previa del customer, pero no bloqueamos la orden.
-
   insert into public.orders (
     nombre_cliente,
     telefono,
@@ -310,7 +186,14 @@ begin
     distrito,
     customer_id,
     user_id,
-    short_code
+    short_code,
+    delivery_name,
+    delivery_phone,
+    delivery_address,
+    delivery_reference,
+    delivery_comment,
+    delivery_provincia,
+    delivery_distrito
   ) values (
     v_name,
     v_phone,
@@ -323,9 +206,16 @@ begin
     pg_catalog.round(v_total, 2),
     v_provincia,
     v_distrito,
-    v_customer_id,
+    null,
     v_uid,
-    null
+    null,
+    v_name,
+    v_phone,
+    v_address,
+    v_referencia,
+    nullif(pg_catalog.btrim(coalesce(payload ->> 'comment', '')), ''),
+    v_provincia,
+    v_distrito
   )
   returning id, created_at into v_order_id, v_created_at;
 
@@ -429,35 +319,6 @@ begin
   set short_code = v_short_id
   where id = v_order_id;
 
-  update public.customers c
-  set
-    name = coalesce(
-      (
-        select nullif(pg_catalog.btrim(coalesce(o2.nombre_cliente, '')), '')
-        from public.orders o2
-        where o2.customer_id = v_customer_id
-          and nullif(pg_catalog.btrim(coalesce(o2.nombre_cliente, '')), '') is not null
-        order by o2.created_at desc
-        limit 1
-      ),
-      c.name
-    ),
-    total_orders = coalesce(s.total_orders, 0),
-    total_spent = coalesce(s.total_spent, 0),
-    last_order_at = s.last_order_at,
-    updated_at = now()
-  from (
-    select
-      o.customer_id,
-      count(*)::int as total_orders,
-      coalesce(sum(o.total), 0)::numeric(12,2) as total_spent,
-      max(o.created_at) as last_order_at
-    from public.orders o
-    where o.customer_id = v_customer_id
-    group by o.customer_id
-  ) s
-  where c.id = s.customer_id;
-
   return pg_catalog.jsonb_build_object(
     'order_id', v_order_id,
     'short_id', v_short_id,
@@ -468,9 +329,8 @@ end;
 $$;
 
 comment on function public.create_order(jsonb) is
-'RPC atómica para crear un pedido e items en una sola transacción. Si falla, hace rollback completo.';
+'RPC atómica para crear un pedido e items en una sola transacción. Guarda snapshot de entrega y no modifica customers por defecto.';
 
--- Seguridad de ejecución: solo roles explícitos
 revoke all on function public.create_order(jsonb) from public;
 grant execute on function public.create_order(jsonb) to anon;
 grant execute on function public.create_order(jsonb) to authenticated;
