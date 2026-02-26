@@ -278,14 +278,14 @@ export default function ZonasDelivery() {
   );
 }
 
-const cardStyle = { background: "#fff", borderRadius: 12, padding: 16, display: "grid", gap: 12, boxShadow: "0 4px 14px rgba(0,0,0,.06)" };
+const cardStyle = { background: "#fff", borderRadius: 12, padding: 16, display: "grid", gap: 12, boxShadow: "0 8px 24px rgba(17,24,39,.04)" };
 const grid2 = { display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" };
 const fieldWrap = { display: "grid", gap: 6, color: "#1f2937", fontSize: 14 };
 const switchRow = { display: "flex", justifyContent: "space-between", alignItems: "center" };
-const inputStyle = { border: "1px solid #d1d5db", borderRadius: 8, padding: "9px 10px", fontSize: 14 };
-const saveBtn = { border: "none", borderRadius: 8, background: "#1f4068", color: "#fff", padding: "10px 12px", cursor: "pointer", fontWeight: 600 };
-const ghostBtn = { border: "1px solid #cfd8e3", borderRadius: 8, background: "#fff", color: "#1f4068", padding: "10px 12px", cursor: "pointer" };
-const smallBtn = { border: "1px solid #cfd8e3", borderRadius: 7, background: "#fff", color: "#1f4068", padding: "6px 8px", cursor: "pointer", fontSize: 12 };
+const inputStyle = { border: "1px solid #dce7e2", borderRadius: 8, padding: "9px 10px", fontSize: 14 };
+const saveBtn = { border: "none", borderRadius: 8, background: "#2fa67f", color: "#fff", padding: "10px 12px", cursor: "pointer", fontWeight: 600 };
+const ghostBtn = { border: "1px solid #cfd8e3", borderRadius: 8, background: "#fff", color: "#2fa67f", padding: "10px 12px", cursor: "pointer" };
+const smallBtn = { border: "1px solid #cfd8e3", borderRadius: 7, background: "#fff", color: "#2fa67f", padding: "6px 8px", cursor: "pointer", fontSize: 12 };
 const dangerBtn = { border: "1px solid #efb0ad", borderRadius: 7, background: "#fff0ef", color: "#b3261e", padding: "6px 8px", cursor: "pointer", fontSize: 12 };
 const tableStyle = { width: "100%", borderCollapse: "collapse", minWidth: 740 };
 const thStyle = { textAlign: "left", borderBottom: "1px solid #e5e7eb", color: "#6b7280", fontSize: 13, padding: "8px 6px" };
