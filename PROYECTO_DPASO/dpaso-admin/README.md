@@ -1,16 +1,41 @@
-# React + Vite
+# dpaso-admin
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Requisito para crear usuarios internos
 
-Currently, two official plugins are available:
+La pantalla **Usuarios internos > Crear usuario interno** usa la Edge Function `create_internal_user`.
+No alcanza con ejecutar solo SQL: además debes desplegar la función y tener variables de entorno correctas.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+### 1) Ejecutar migración SQL
+Aplica la migración:
 
-## React Compiler
+- `PROYECTO_DPASO/Carta-Dpaso-main/supabase/sprint41_security_roles_hotfix.sql`
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Esto crea/actualiza:
+- funciones de rol seguras (`get_admin_panel_role`, `is_admin_user`, `is_role_*`)
+- RPCs de usuarios internos (`rpc_admin_list_users`, `rpc_admin_set_user_role`)
+- hardening RLS
 
-## Expanding the ESLint configuration
+### 2) Desplegar Edge Function
+Desde `Carta-Dpaso-main`:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+supabase functions deploy create_internal_user
+```
+
+### 3) Verificar variables de entorno en Supabase (Edge Functions)
+Configura en el proyecto:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Si falta deploy o hay variables mal configuradas, en UI verás un error como:
+`Failed to send a request to the Edge Function`.
+
+### 4) Cliente admin (frontend)
+Asegúrate de tener en `.env` del panel admin:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+Sin eso, el panel no podrá invocar RPCs/functions.
