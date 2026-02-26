@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-const DEFAULT_ROLE = "admin";
+export const DEFAULT_ROLE = "none";
+export const VALID_ROLES = ["admin", "cajero", "mozo", "cocina"];
 
-const ROLE_ALLOWED_AREAS = {
+export const ROLE_ALLOWED_AREAS = {
+  none: [],
   admin: ["*"],
-  cajero: ["dashboard", "pedidos", "pedido-detalle", "caja", "reportes"],
-  mozo: ["dashboard", "salon", "cocina", "pedidos", "pedido-detalle"],
+  cajero: ["dashboard", "pedidos", "pedido-detalle", "clientes", "caja", "reportes"],
+  mozo: ["dashboard", "pedidos", "pedido-detalle", "salon", "cocina"],
   cocina: ["dashboard", "cocina"],
 };
 
-function resolveRoleFromUser(user) {
-  const claimRole = user?.app_metadata?.admin_role || user?.user_metadata?.admin_role;
-  return String(claimRole || "").trim().toLowerCase();
+function normalizeRole(value) {
+  const role = String(value || "").trim().toLowerCase();
+  return VALID_ROLES.includes(role) ? role : DEFAULT_ROLE;
 }
 
 export default function useAdminRole() {
@@ -24,16 +26,9 @@ export default function useAdminRole() {
 
     async function loadRole() {
       setLoadingRole(true);
+
       const { data: authData } = await supabase.auth.getUser();
       const user = authData?.user || null;
-      const claimRole = resolveRoleFromUser(user);
-      if (claimRole && ROLE_ALLOWED_AREAS[claimRole]) {
-        if (mounted) {
-          setRole(claimRole);
-          setLoadingRole(false);
-        }
-        return;
-      }
 
       if (!user?.id) {
         if (mounted) {
@@ -49,28 +44,27 @@ export default function useAdminRole() {
         .eq("user_id", user.id)
         .maybeSingle();
 
-      const dbRole = String(roleData?.role || "").trim().toLowerCase();
       if (mounted) {
-        setRole(ROLE_ALLOWED_AREAS[dbRole] ? dbRole : DEFAULT_ROLE);
+        setRole(normalizeRole(roleData?.role));
         setLoadingRole(false);
       }
     }
 
     loadRole();
+
     return () => {
       mounted = false;
     };
   }, []);
 
-  const api = useMemo(() => ({
-    role,
-    loadingRole,
-    canAccess: (area) => {
-      const allowed = ROLE_ALLOWED_AREAS[role] || ROLE_ALLOWED_AREAS[DEFAULT_ROLE];
-      return allowed.includes("*") || allowed.includes(area);
-    },
-    isOneOf: (roles) => roles.includes(role),
-  }), [loadingRole, role]);
+  return useMemo(() => {
+    const allowed = ROLE_ALLOWED_AREAS[role] || ROLE_ALLOWED_AREAS[DEFAULT_ROLE];
 
-  return api;
+    return {
+      role,
+      loadingRole,
+      canAccess: (area) => allowed.includes("*") || allowed.includes(area),
+      isOneOf: (roles) => roles.includes(role),
+    };
+  }, [loadingRole, role]);
 }

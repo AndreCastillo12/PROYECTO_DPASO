@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FunctionsHttpError } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabaseClient";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
@@ -11,12 +12,35 @@ function errMsg(error, fallback) {
   return msg ? `${fallback}: ${msg}` : fallback;
 }
 
+async function getInvokeError(error, fallback) {
+  if (!error) return fallback;
+
+  const rawMessage = String(error?.message || "");
+  if (rawMessage.toLowerCase().includes("failed to send a request to the edge function")) {
+    return `${fallback}: no se pudo conectar con la Edge Function 'create_internal_user'. Verifica deploy y variables SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY.`;
+  }
+
+  if (error instanceof FunctionsHttpError) {
+    const response = error.context;
+    const status = response?.status || "unknown";
+    let body = "";
+    try {
+      body = JSON.stringify(await response.json());
+    } catch {
+      body = await response.text();
+    }
+    return `${fallback} (status ${status})${body ? `: ${body}` : ""}`;
+  }
+  return errMsg(error, fallback);
+}
+
 export default function Usuarios() {
   const { canAccess } = useAdminRole();
-  const { toast, showToast } = useToast(2800);
+  const { toast, showToast } = useToast(4800);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [users, setUsers] = useState([]);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [newRole, setNewRole] = useState("cocina");
@@ -25,7 +49,7 @@ export default function Usuarios() {
     setLoading(true);
     const { data, error } = await supabase.rpc("rpc_admin_list_users");
     if (error) {
-      showToast(errMsg(error, "No se pudo cargar usuarios"), "error");
+      showToast(errMsg(error, "No se pudo cargar usuarios internos"), "error");
       setUsers([]);
       setLoading(false);
       return;
@@ -35,7 +59,11 @@ export default function Usuarios() {
   };
 
   useEffect(() => {
-    loadUsers();
+    const timer = setTimeout(() => {
+      loadUsers();
+    }, 0);
+
+    return () => clearTimeout(timer);
   }, []);
 
   const saveRole = async (userId, role) => {
@@ -60,13 +88,31 @@ export default function Usuarios() {
       return;
     }
 
+    const payload = { email: email.trim(), password: password.trim(), role: newRole };
+
     setBusy(true);
-    const { data, error } = await supabase.functions.invoke("admin-users-create", {
-      body: { email: email.trim(), password: password.trim(), role: newRole },
-    });
+
+    const primary = await supabase.functions.invoke("create_internal_user", { body: payload });
+
+    let data = primary.data;
+    let error = primary.error;
+
+    const primaryConnectionError = String(error?.message || "").toLowerCase().includes("failed to send a request to the edge function");
+
+    if (primaryConnectionError) {
+      const legacy = await supabase.functions.invoke("admin-users-create", { body: payload });
+      if (!legacy.error && legacy.data?.ok === true) {
+        data = legacy.data;
+        error = null;
+        showToast("Usuario interno creado (fallback admin-users-create)", "success");
+      } else if (legacy.error) {
+        error = legacy.error;
+      }
+    }
 
     if (error || data?.ok !== true) {
-      showToast(errMsg(error || new Error(data?.error || "Error"), "No se pudo crear usuario interno"), "error");
+      const message = await getInvokeError(error, "No se pudo crear usuario interno");
+      showToast(data?.error ? `${message}: ${data.error}` : message, "error");
       setBusy(false);
       return;
     }
@@ -76,7 +122,9 @@ export default function Usuarios() {
     setNewRole("cocina");
     await loadUsers();
     setBusy(false);
-    showToast("Usuario interno creado", "success");
+    if (!primaryConnectionError) {
+      showToast("Usuario interno creado", "success");
+    }
   };
 
   if (!canAccess("usuarios")) return <p>No tienes permisos para Usuarios.</p>;
@@ -107,7 +155,7 @@ export default function Usuarios() {
                 <small style={{ display: "block", color: "#6b7280" }}>{u.email}</small>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <select defaultValue={u.role || "admin"} onChange={(e) => saveRole(u.user_id, e.target.value)} disabled={busy} style={inputStyle}>
+                <select value={u.role || "admin"} onChange={(e) => saveRole(u.user_id, e.target.value)} disabled={busy} style={inputStyle}>
                   {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
               </div>

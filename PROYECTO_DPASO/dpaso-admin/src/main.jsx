@@ -20,6 +20,7 @@ import Cocina from "./pages/Cocina";
 import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
 import ProtectedRoute from "./components/ProtectedRoute";
+import RoleRouteGuard from "./components/RoleRouteGuard";
 
 const router = createBrowserRouter([
   { path: "/login", element: <Login /> },
@@ -33,21 +34,23 @@ const router = createBrowserRouter([
       </ProtectedRoute>
     ),
     children: [
-      { index: true, element: <Dashboard /> },   // / -> dashboard
-      { path: "platos", element: <Platos /> }, // /platos
-      { path: "categorias", element: <Categorias /> }, // /categorias
-      { path: "perfil", element: <Perfil /> }, // /perfil
-      { path: "pedidos", element: <Pedidos /> }, // /pedidos
-      { path: "pedido-detalle", element: <OrderDetail /> }, // /pedido-detalle
-      { path: "tienda", element: <Tienda /> }, // /tienda
-      { path: "zonas-delivery", element: <ZonasDelivery /> }, // /zonas-delivery
-      { path: "caja", element: <Caja /> }, // /caja
-      { path: "dashboard", element: <Dashboard /> }, // /dashboard
-      { path: "reportes", element: <Reportes /> }, // /reportes
-      { path: "clientes", element: <Clientes /> }, // /clientes
-      { path: "usuarios", element: <Usuarios /> }, // /usuarios
-      { path: "salon", element: <Salon /> }, // /salon
-      { path: "cocina", element: <Cocina /> }, // /cocina
+      { index: true, element: <Dashboard /> },
+      { path: "dashboard", element: <Dashboard /> },
+      { path: "perfil", element: <Perfil /> },
+
+      { path: "pedidos", element: <RoleRouteGuard area="pedidos"><Pedidos /></RoleRouteGuard> },
+      { path: "pedido-detalle", element: <RoleRouteGuard area="pedido-detalle"><OrderDetail /></RoleRouteGuard> },
+      { path: "clientes", element: <RoleRouteGuard area="clientes"><Clientes /></RoleRouteGuard> },
+      { path: "caja", element: <RoleRouteGuard area="caja"><Caja /></RoleRouteGuard> },
+      { path: "salon", element: <RoleRouteGuard area="salon"><Salon /></RoleRouteGuard> },
+      { path: "cocina", element: <RoleRouteGuard area="cocina"><Cocina /></RoleRouteGuard> },
+      { path: "usuarios", element: <RoleRouteGuard area="usuarios"><Usuarios /></RoleRouteGuard> },
+
+      { path: "reportes", element: <RoleRouteGuard area="reportes"><Reportes /></RoleRouteGuard> },
+      { path: "platos", element: <RoleRouteGuard area="platos"><Platos /></RoleRouteGuard> },
+      { path: "categorias", element: <RoleRouteGuard area="categorias"><Categorias /></RoleRouteGuard> },
+      { path: "tienda", element: <RoleRouteGuard area="tienda"><Tienda /></RoleRouteGuard> },
+      { path: "zonas-delivery", element: <RoleRouteGuard area="zonas-delivery"><ZonasDelivery /></RoleRouteGuard> },
     ],
   },
 
