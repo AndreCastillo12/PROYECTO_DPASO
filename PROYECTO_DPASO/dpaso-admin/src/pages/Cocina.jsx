@@ -52,7 +52,7 @@ export default function Cocina() {
       supabase
         .from("kitchen_commands")
         .select("id,ticket_id,order_id,table_id,table_name_snapshot,ticket_code_snapshot,note,status,source_type,created_at")
-        .order("created_at", { ascending: true })
+        .order("created_at", { ascending: false })
         .in("status", ["pending", "preparing", "ready"]),
       supabase
         .from("kitchen_command_items")
@@ -72,6 +72,28 @@ export default function Cocina() {
     loadData();
   }, []);
 
+
+
+  const groupedCommands = useMemo(() => {
+    const map = new Map();
+    commands.forEach((command) => {
+      const groupName = command.table_name_snapshot || (command.source_type === "web" ? "Pedidos Web" : "Mesa sin nombre");
+      const list = map.get(groupName) || [];
+      list.push(command);
+      map.set(groupName, list);
+    });
+
+    return Array.from(map.entries())
+      .map(([groupName, list]) => ({
+        groupName,
+        list: list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+      }))
+      .sort((a, b) => {
+        const aTime = new Date(a.list[0]?.created_at || 0).getTime();
+        const bTime = new Date(b.list[0]?.created_at || 0).getTime();
+        return bTime - aTime;
+      });
+  }, [commands]);
   const itemsByCommand = useMemo(() => {
     const map = new Map();
     commandItems.forEach((item) => {
@@ -112,41 +134,60 @@ export default function Cocina() {
       <h2 style={{ margin: 0 }}>Cocina (Comandas)</h2>
       <section style={{ background: "#fff", borderRadius: 12, padding: 12 }}>
         {commands.length === 0 ? <p>No hay comandas activas.</p> : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {commands.map((command) => {
-              const next = nextStatus(command.status);
-              const badge = statusBadge(command.status);
-              const items = itemsByCommand.get(command.id) || [];
+          <div style={{ display: "grid", gap: 12 }}>
+            {groupedCommands.map(({ groupName, list }) => (
+              <article key={groupName} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <strong>{groupName}</strong>
+                  <small style={{ color: "#6b7280" }}>{list.length} pedido(s)</small>
+                </div>
 
-              return (
-                <article key={command.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                    <div>
-                      <strong>{command.table_name_snapshot || (command.source_type === "web" ? "Web" : "Mesa")} · Ticket {String(command.ticket_code_snapshot || command.ticket_id || command.order_id || "").slice(0, 8).toUpperCase()}</strong>
-                      <div style={{ color: "#6b7280", marginTop: 4 }}>Hora: {fmtHour(command.created_at)}</div>
-                    </div>
-                    <span style={{ borderRadius: 999, padding: "5px 10px", fontSize: 12, ...badge }}>{STATUS_LABEL[command.status] || command.status}</span>
-                  </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 10,
+                    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 360px))",
+                    justifyContent: "start",
+                    alignItems: "start",
+                  }}
+                >
+                  {list.map((command) => {
+                    const next = nextStatus(command.status);
+                    const badge = statusBadge(command.status);
+                    const items = itemsByCommand.get(command.id) || [];
 
-                  <ul style={{ margin: "10px 0", paddingLeft: 18 }}>
-                    {items.map((item) => <li key={item.id}>{item.qty} × {item.name_snapshot}</li>)}
-                  </ul>
+                    return (
+                      <article key={command.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, minHeight: 210, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                          <div>
+                            <strong>Ticket {String(command.ticket_code_snapshot || command.ticket_id || command.order_id || "").slice(0, 8).toUpperCase()}</strong>
+                            <div style={{ color: "#6b7280", marginTop: 4 }}>Hora: {fmtHour(command.created_at)}</div>
+                          </div>
+                          <span style={{ borderRadius: 999, padding: "5px 10px", fontSize: 12, ...badge }}>{STATUS_LABEL[command.status] || command.status}</span>
+                        </div>
 
-                  {command.note ? <p style={{ margin: "0 0 10px" }}><strong>Nota:</strong> {command.note}</p> : null}
+                        <ul style={{ margin: "10px 0", paddingLeft: 18 }}>
+                          {items.map((item) => <li key={item.id}>{item.qty} × {item.name_snapshot}</li>)}
+                        </ul>
 
-                  {next ? (
-                    <button
-                      type="button"
-                      style={{ background: "#2fa67f", color: "#fff", border: "none", borderRadius: 8, padding: "8px 10px" }}
-                      disabled={busyId === command.id}
-                      onClick={() => onAdvance(command)}
-                    >
-                      Pasar a {STATUS_LABEL[next]}
-                    </button>
-                  ) : null}
-                </article>
-              );
-            })}
+                        {command.note ? <p style={{ margin: "0 0 10px" }}><strong>Nota:</strong> {command.note}</p> : null}
+
+                        {next ? (
+                          <button
+                            type="button"
+                            style={{ background: "#2fa67f", color: "#fff", border: "none", borderRadius: 8, padding: "8px 10px" }}
+                            disabled={busyId === command.id}
+                            onClick={() => onAdvance(command)}
+                          >
+                            Pasar a {STATUS_LABEL[next]}
+                          </button>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              </article>
+            ))}
           </div>
         )}
       </section>
