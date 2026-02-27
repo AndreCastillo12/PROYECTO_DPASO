@@ -23,6 +23,41 @@ function getDaysSince(dateValue) {
   return Math.floor((now - d) / (1000 * 60 * 60 * 24));
 }
 
+
+
+function aggregateClients(rows) {
+  const map = new Map();
+
+  rows.forEach((row) => {
+    const registeredId = row.auth_user_id || row.user_id;
+    const guestName = String(row.name || "").trim().toLowerCase();
+    const guestPhone = String(row.phone || "").replace(/\D/g, "");
+    const key = registeredId ? `registered:${registeredId}` : `guest:${guestName}:${guestPhone}`;
+
+    if (!map.has(key)) {
+      map.set(key, {
+        ...row,
+        customer_ids: [row.id],
+      });
+      return;
+    }
+
+    const current = map.get(key);
+    const currentLast = current.last_order_at ? new Date(current.last_order_at).getTime() : 0;
+    const rowLast = row.last_order_at ? new Date(row.last_order_at).getTime() : 0;
+
+    map.set(key, {
+      ...current,
+      total_orders: Number(current.total_orders || 0) + Number(row.total_orders || 0),
+      total_spent: Number(current.total_spent || 0) + Number(row.total_spent || 0),
+      last_order_at: rowLast > currentLast ? row.last_order_at : current.last_order_at,
+      customer_ids: [...current.customer_ids, row.id],
+    });
+  });
+
+  return Array.from(map.values());
+}
+
 function getClientSegment(client) {
   const orders = Number(client?.total_orders || 0);
   const spent = Number(client?.total_spent || 0);
@@ -77,7 +112,7 @@ export default function Clientes() {
       return false;
     }
 
-    const rows = (data || []).filter((row) => {
+    const filteredRows = (data || []).filter((row) => {
       const d = row.last_order_at ? new Date(row.last_order_at) : null;
       if (dateFrom) {
         const start = new Date(`${dateFrom}T00:00:00`);
@@ -90,6 +125,8 @@ export default function Clientes() {
       return true;
     });
 
+    const rows = aggregateClients(filteredRows);
+
     setClients(rows);
     setSelectedClient((prev) => {
       if (!prev?.id) return rows[0] || null;
@@ -100,8 +137,8 @@ export default function Clientes() {
     return true;
   }, [dateFrom, dateTo, search, showToast, sortBy]);
 
-  const loadClientOrders = useCallback(async (customerId) => {
-    if (!customerId) {
+  const loadClientOrders = useCallback(async (customerIds = []) => {
+    if (!customerIds.length) {
       setOrders([]);
       return;
     }
@@ -110,7 +147,7 @@ export default function Clientes() {
     const { data, error } = await supabase
       .from("orders")
       .select("id,created_at,total,estado,modalidad,paid,payment_method,short_code,nombre_cliente,telefono")
-      .eq("customer_id", customerId)
+            .in("customer_id", customerIds)
       .order("created_at", { ascending: false })
       .limit(100);
 
@@ -130,7 +167,7 @@ export default function Clientes() {
   }, [loadClients]);
 
   useEffect(() => {
-    loadClientOrders(selectedClient?.id);
+    loadClientOrders(selectedClient?.customer_ids || []);
   }, [loadClientOrders, selectedClient?.id]);
 
   const ticketPromedio = useMemo(() => {
