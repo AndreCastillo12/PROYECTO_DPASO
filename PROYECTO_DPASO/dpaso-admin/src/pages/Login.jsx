@@ -26,6 +26,14 @@ export default function Login() {
     showToast("Sesión cerrada por inactividad", "info");
   }, []);
 
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("reason");
+    if (reason === "unauthorized") {
+      showToast("No autorizado", "error");
+    }
+  }, []);
+
+
   async function handleLogin(e) {
     e.preventDefault();
 
