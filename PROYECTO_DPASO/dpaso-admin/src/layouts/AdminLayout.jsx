@@ -28,9 +28,9 @@ const NAV_ITEMS = [
   { to: "/pedidos", label: "Lista pedidos", icon: FiShoppingBag, area: "pedidos" },
   { to: "/pedido-detalle", label: "Detalle pedido", icon: FiFileText, area: "pedido-detalle" },
   { to: "/clientes", label: "Clientes", icon: FiUsers, area: "clientes" },
-  { to: "/usuarios", label: "Usuarios", icon: FiUsers, area: "usuarios" },
+  { to: "/usuarios", label: "Roles y usuario", icon: FiUsers, area: "usuarios" },
   { to: "/caja", label: "Caja", icon: FiBox, area: "caja" },
-  { to: "/salon", label: "Salón", icon: FiGrid, area: "salon" },
+  { to: "/salon", label: "Local", icon: FiGrid, area: "salon" },
   { to: "/cocina", label: "Cocina", icon: FiList, area: "cocina" },
   { to: "/reportes", label: "Reportes", icon: FiBarChart2, area: "reportes" },
   { to: "/platos", label: "Platos", icon: FiList, area: "platos" },
@@ -48,7 +48,7 @@ export default function AdminLayout() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [avatarUrl, setAvatarUrl] = useState("");
-  const { canAccess, loadingRole } = useAdminRole();
+  const { canAccess, loadingRole, role } = useAdminRole();
 
   useEffect(() => {
     let active = true;
@@ -199,7 +199,7 @@ export default function AdminLayout() {
 
               {profileMenuOpen ? (
                 <div className="admin-profile-dropdown">
-                  <button type="button" onClick={openProfile}>Editar perfil</button>
+                  {role === "admin" ? <button type="button" onClick={openProfile}>Editar perfil</button> : null}
                   <button type="button" onClick={cerrarSesion}>Cerrar sesión</button>
                 </div>
               ) : null}
