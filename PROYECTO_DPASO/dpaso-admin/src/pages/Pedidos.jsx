@@ -33,7 +33,7 @@ function normalizeStatus(status) {
 
 function isSalonOrder(order) {
   const text = String(order?.modalidad || "").toLowerCase();
-  return ["salon", "salón", "mesa"].some((token) => text.includes(token));
+  return ["salon", "salón", "local", "mesa"].some((token) => text.includes(token));
 }
 
 function isPickupOrder(order) {
@@ -47,7 +47,7 @@ function getStatusFlow(order) {
 }
 
 function humanModalidad(order) {
-  if (isSalonOrder(order)) return `Salón · Mesa ${order?.table_number || "-"}`;
+  if (isSalonOrder(order)) return `Local · Mesa ${order?.table_number || "-"}`;
   return isPickupOrder(order) ? "Recojo" : "Delivery";
 }
 
