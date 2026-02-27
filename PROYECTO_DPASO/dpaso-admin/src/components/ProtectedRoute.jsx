@@ -34,16 +34,8 @@ export default function ProtectedRoute({ children }) {
 
       if (!mounted) return;
 
-      let normalizedRole = String(roleData?.role || "").trim().toLowerCase();
-      let authorized = ["admin", "cajero", "mozo", "cocina"].includes(normalizedRole);
-
-      if (!authorized) {
-        const { data: bootstrapData, error: bootstrapError } = await supabase.rpc("rpc_admin_bootstrap_first_admin");
-        if (!bootstrapError) {
-          normalizedRole = String(bootstrapData?.role || "").trim().toLowerCase();
-          authorized = ["admin", "cajero", "mozo", "cocina"].includes(normalizedRole);
-        }
-      }
+      const normalizedRole = String(roleData?.role || "").trim().toLowerCase();
+      const authorized = ["admin", "cajero", "mozo", "cocina"].includes(normalizedRole);
 
       if (!authorized) {
         await supabase.auth.signOut();

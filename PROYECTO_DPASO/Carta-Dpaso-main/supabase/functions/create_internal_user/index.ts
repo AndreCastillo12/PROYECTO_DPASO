@@ -66,9 +66,19 @@ Deno.serve(async (req) => {
       .from("admin_panel_user_roles")
       .upsert({ user_id: userId, role }, { onConflict: "user_id" });
 
-    await serviceClient
+    const { error: workerError } = await serviceClient
       .from("internal_worker_accounts")
       .upsert({ user_id: userId, created_by: caller.id }, { onConflict: "user_id" });
+
+    if (workerError) {
+      await serviceClient.from("admin_panel_user_roles").delete().eq("user_id", userId);
+      await serviceClient.auth.admin.deleteUser(userId);
+      return jsonResponse(500, {
+        ok: false,
+        error: "WORKER_ACCOUNT_SYNC_FAILED",
+        detail: workerError.message,
+      });
+    }
 
     if (roleError) {
       await serviceClient.auth.admin.deleteUser(userId);
