@@ -112,14 +112,21 @@ export default function Cocina() {
       <h2 style={{ margin: 0 }}>Cocina (Comandas)</h2>
       <section style={{ background: "#fff", borderRadius: 12, padding: 12 }}>
         {commands.length === 0 ? <p>No hay comandas activas.</p> : (
-          <div style={{ display: "grid", gap: 10 }}>
+          <div
+            style={{
+              display: "grid",
+              gap: 10,
+              gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+              alignItems: "start",
+            }}
+          >
             {commands.map((command) => {
               const next = nextStatus(command.status);
               const badge = statusBadge(command.status);
               const items = itemsByCommand.get(command.id) || [];
 
               return (
-                <article key={command.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
+                <article key={command.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, minHeight: 210, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                     <div>
                       <strong>{command.table_name_snapshot || (command.source_type === "web" ? "Web" : "Mesa")} · Ticket {String(command.ticket_code_snapshot || command.ticket_id || command.order_id || "").slice(0, 8).toUpperCase()}</strong>
