@@ -77,12 +77,93 @@ Deno.serve(async (req) => {
     }
 
     if (action === "delete_user") {
-      await adminClient.from("admin_panel_user_roles").delete().eq("user_id", userId);
-      await adminClient.from("profiles").delete().eq("id", userId);
+      const steps: Array<{ step: string; status: "ok" | "error"; detail?: string }> = [];
+
+      const { data: previousRole, error: previousRoleError } = await adminClient
+        .from("admin_panel_user_roles")
+        .select("user_id, role")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (previousRoleError) {
+        return jsonResponse(500, {
+          ok: false,
+          error: "PRE_DELETE_SNAPSHOT_FAILED",
+          detail: previousRoleError.message,
+        });
+      }
+
+      const { data: previousProfile, error: previousProfileError } = await adminClient
+        .from("profiles")
+        .select("id, role")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (previousProfileError) {
+        return jsonResponse(500, {
+          ok: false,
+          error: "PRE_DELETE_SNAPSHOT_FAILED",
+          detail: previousProfileError.message,
+        });
+      }
+
+      const { error: roleDeleteError } = await adminClient.from("admin_panel_user_roles").delete().eq("user_id", userId);
+      if (roleDeleteError) {
+        steps.push({ step: "delete_role", status: "error", detail: roleDeleteError.message });
+        return jsonResponse(500, { ok: false, error: "DELETE_ROLE_FAILED", steps });
+      }
+      steps.push({ step: "delete_role", status: "ok" });
+
+      const { error: profileDeleteError } = await adminClient.from("profiles").delete().eq("id", userId);
+      if (profileDeleteError) {
+        steps.push({ step: "delete_profile", status: "error", detail: profileDeleteError.message });
+
+        if (previousRole) {
+          const { error: rollbackRoleError } = await adminClient
+            .from("admin_panel_user_roles")
+            .upsert(previousRole, { onConflict: "user_id" });
+          steps.push({
+            step: "rollback_role",
+            status: rollbackRoleError ? "error" : "ok",
+            detail: rollbackRoleError?.message,
+          });
+        }
+
+        return jsonResponse(500, { ok: false, error: "DELETE_PROFILE_FAILED", steps });
+      }
+      steps.push({ step: "delete_profile", status: "ok" });
 
       const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId);
-      if (deleteError) return jsonResponse(400, { ok: false, error: deleteError.message || "DELETE_USER_FAILED" });
-      return jsonResponse(200, { ok: true, action, user_id: userId });
+      if (deleteError) {
+        steps.push({ step: "delete_auth_user", status: "error", detail: deleteError.message || "DELETE_USER_FAILED" });
+
+        if (previousRole) {
+          const { error: rollbackRoleError } = await adminClient
+            .from("admin_panel_user_roles")
+            .upsert(previousRole, { onConflict: "user_id" });
+          steps.push({
+            step: "rollback_role",
+            status: rollbackRoleError ? "error" : "ok",
+            detail: rollbackRoleError?.message,
+          });
+        }
+
+        if (previousProfile) {
+          const { error: rollbackProfileError } = await adminClient
+            .from("profiles")
+            .upsert(previousProfile, { onConflict: "id" });
+          steps.push({
+            step: "rollback_profile",
+            status: rollbackProfileError ? "error" : "ok",
+            detail: rollbackProfileError?.message,
+          });
+        }
+
+        return jsonResponse(500, { ok: false, error: "DELETE_USER_FAILED", steps });
+      }
+
+      steps.push({ step: "delete_auth_user", status: "ok" });
+      return jsonResponse(200, { ok: true, action, user_id: userId, steps });
     }
 
     return jsonResponse(400, { ok: false, error: "INVALID_ACTION" });
