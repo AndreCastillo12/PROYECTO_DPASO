@@ -1,20 +1,45 @@
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+const LEGACY_RETIRE_DATE = "2026-06-30";
+const LEGACY_ENABLED = (Deno.env.get("ENABLE_LEGACY_ADMIN_USER_FUNCTIONS") || "false").trim().toLowerCase() === "true";
 
-function jsonResponse(status: number, payload: Record<string, unknown>) {
+const ALLOWED_ORIGINS = (Deno.env.get("ADMIN_ALLOWED_ORIGINS") || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+function buildCorsHeaders(req: Request) {
+  const requestOrigin = req.headers.get("Origin") || "";
+  const allowedOrigin = ALLOWED_ORIGINS.includes(requestOrigin) ? requestOrigin : "null";
+
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    Vary: "Origin",
+  };
+}
+
+function jsonResponse(req: Request, status: number, payload: Record<string, unknown>) {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { ...CORS, "Content-Type": "application/json" },
+    headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" },
   });
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: buildCorsHeaders(req) });
+  if (req.method !== "POST") return jsonResponse(req, 405, { ok: false, error: "METHOD_NOT_ALLOWED" });
+
+  if (!LEGACY_ENABLED) {
+    return jsonResponse(req, 410, {
+      ok: false,
+      error: "FUNCTION_DEPRECATED",
+      detail: "Use create_worker_base_user + manage_internal_user flow",
+      retire_at: LEGACY_RETIRE_DATE,
+    });
+  }
 
   try {
     const url = Deno.env.get("SUPABASE_URL") || "";
@@ -22,7 +47,7 @@ Deno.serve(async (req) => {
     const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
     if (!url || !anon || !service) {
-      return jsonResponse(500, { ok: false, error: "MISSING_SUPABASE_ENV" });
+      return jsonResponse(req, 500, { ok: false, error: "MISSING_SUPABASE_ENV" });
     }
 
     const authHeader = req.headers.get("Authorization") || "";
@@ -31,7 +56,7 @@ Deno.serve(async (req) => {
 
     const { data: callerData } = await callerClient.auth.getUser();
     const caller = callerData?.user;
-    if (!caller?.id) return jsonResponse(401, { ok: false, error: "UNAUTHORIZED" });
+    if (!caller?.id) return jsonResponse(req, 401, { ok: false, error: "UNAUTHORIZED" });
 
     const { data: callerRoleRow } = await serviceClient
       .from("admin_panel_user_roles")
@@ -40,15 +65,20 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     const callerRole = String(callerRoleRow?.role || "").trim().toLowerCase();
-    if (callerRole !== "admin") return jsonResponse(403, { ok: false, error: "FORBIDDEN" });
+    if (callerRole !== "admin") return jsonResponse(req, 403, { ok: false, error: "FORBIDDEN" });
 
     const body = await req.json();
     const email = String(body?.email || "").trim().toLowerCase();
     const password = String(body?.password || "").trim();
     const role = String(body?.role || "cocina").trim().toLowerCase();
 
-    if (!email || !password) return jsonResponse(400, { ok: false, error: "EMAIL_PASSWORD_REQUIRED" });
-    if (!["admin", "cajero", "mozo", "cocina"].includes(role)) return jsonResponse(400, { ok: false, error: "INVALID_ROLE" });
+    if (!email || !password) return jsonResponse(req, 400, { ok: false, error: "EMAIL_PASSWORD_REQUIRED" });
+    if (![
+      "admin",
+      "cajero",
+      "mozo",
+      "cocina",
+    ].includes(role)) return jsonResponse(req, 400, { ok: false, error: "INVALID_ROLE" });
 
     const { data: created, error: createError } = await serviceClient.auth.admin.createUser({
       email,
@@ -57,7 +87,7 @@ Deno.serve(async (req) => {
     });
 
     if (createError || !created?.user?.id) {
-      return jsonResponse(400, { ok: false, error: createError?.message || "CREATE_USER_FAILED" });
+      return jsonResponse(req, 400, { ok: false, error: createError?.message || "CREATE_USER_FAILED" });
     }
 
     const userId = created.user.id;
@@ -73,7 +103,7 @@ Deno.serve(async (req) => {
     if (workerError) {
       await serviceClient.from("admin_panel_user_roles").delete().eq("user_id", userId);
       await serviceClient.auth.admin.deleteUser(userId);
-      return jsonResponse(500, {
+      return jsonResponse(req, 500, {
         ok: false,
         error: "WORKER_ACCOUNT_SYNC_FAILED",
         detail: workerError.message,
@@ -82,7 +112,7 @@ Deno.serve(async (req) => {
 
     if (roleError) {
       await serviceClient.auth.admin.deleteUser(userId);
-      return jsonResponse(500, {
+      return jsonResponse(req, 500, {
         ok: false,
         error: "ROLE_ASSIGN_FAILED",
         detail: roleError.message,
@@ -96,15 +126,15 @@ Deno.serve(async (req) => {
     if (profileError) {
       await serviceClient.from("admin_panel_user_roles").delete().eq("user_id", userId);
       await serviceClient.auth.admin.deleteUser(userId);
-      return jsonResponse(500, {
+      return jsonResponse(req, 500, {
         ok: false,
         error: "PROFILE_SYNC_FAILED",
         detail: profileError.message,
       });
     }
 
-    return jsonResponse(200, { ok: true, user_id: userId, email, role });
+    return jsonResponse(req, 200, { ok: true, user_id: userId, email, role });
   } catch (error: any) {
-    return jsonResponse(500, { ok: false, error: error?.message || "UNEXPECTED_ERROR" });
+    return jsonResponse(req, 500, { ok: false, error: error?.message || "UNEXPECTED_ERROR" });
   }
 });
