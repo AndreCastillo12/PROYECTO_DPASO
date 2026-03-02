@@ -1,66 +1,158 @@
-.login-container {
-  min-height: 100vh;
-  background: linear-gradient(135deg, #0f172a, #020617);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+:root {
+  --dp-login-bg: #f2f3f7;
+  --dp-login-panel: #ffffff;
+  --dp-login-line: #e8e9ee;
+  --dp-login-text: #252a37;
+  --dp-login-muted: #8f94a3;
+  --dp-login-accent: #58c6a9;
+  --dp-login-accent-strong: #2f9f83;
+  --dp-login-accent-soft: #dcf7ef;
 }
 
-.login-card {
-  background: #0b1220;
-  padding: 40px;
-  width: 100%;
-  max-width: 380px;
-  border-radius: 16px;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+.dp-login {
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 380px at 15% 0%, rgba(88, 198, 169, 0.19), transparent 60%),
+    radial-gradient(900px 340px at 88% 100%, rgba(47, 159, 131, 0.16), transparent 60%),
+    var(--dp-login-bg);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.dp-login__card {
+  width: min(420px, 94vw);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid var(--dp-login-line);
+  border-radius: 20px;
+  box-shadow: 0 18px 40px rgba(20, 31, 56, 0.12);
+  overflow: hidden;
+}
+
+.dp-login__brand {
+  padding: 26px 28px 18px;
+  background: linear-gradient(135deg, #253044 0%, #1d2737 62%, #172132 100%);
+  color: #fff;
   text-align: center;
 }
 
-.login-logo {
-  width: 120px;
-  margin-bottom: 20px;
+.dp-login__logo {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 12px;
+  border-radius: 14px;
+  background: linear-gradient(140deg, var(--dp-login-accent), var(--dp-login-accent-strong));
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
 }
 
-.login-card h2 {
-  color: #f8fafc;
-  margin-bottom: 4px;
+.dp-login__brand h1 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: 0.1px;
 }
 
-.subtitle {
-  color: #94a3b8;
-  font-size: 14px;
-  margin-bottom: 24px;
+.dp-login__brand p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #c4ccda;
 }
 
-.login-card input {
-  width: 100%;
-  padding: 12px 14px;
-  margin-bottom: 14px;
-  border-radius: 10px;
-  border: none;
-  outline: none;
-  background: #020617;
-  color: #f8fafc;
-  font-size: 14px;
+.dp-login__form {
+  padding: 22px 28px 28px;
+  display: grid;
+  gap: 12px;
 }
 
-.login-card input::placeholder {
-  color: #64748b;
+.dp-login__field {
+  display: grid;
+  gap: 6px;
 }
 
-.btn-login {
-  width: 100%;
-  padding: 12px;
-  background: #178d42; /* DPASO green */
-  border: none;
-  border-radius: 10px;
-  color: #fff;
+.dp-login__field span {
+  font-size: 13px;
+  color: var(--dp-login-muted);
   font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
 }
 
-.btn-login:hover {
-  background: #16a34a;
-  transform: translateY(-1px);
+.dp-login__field input {
+  width: 100%;
+  border: 1px solid var(--dp-login-line);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 14px;
+  color: var(--dp-login-text);
+  background: #fff;
+  box-sizing: border-box;
 }
+
+.dp-login__field input:focus {
+  outline: none;
+  border-color: #8ee4cb;
+  box-shadow: 0 0 0 3px var(--dp-login-accent-soft);
+}
+
+.dp-login__password-wrap {
+  position: relative;
+}
+
+.dp-login__password-wrap input {
+  padding-right: 44px;
+}
+
+.dp-login__eye {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  font-size: 17px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.dp-login__submit {
+  margin-top: 6px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--dp-login-accent), var(--dp-login-accent-strong));
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.dp-login__submit:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.dp-login__forgot {
+  border: 1px solid var(--dp-login-line);
+  border-radius: 12px;
+  background: #fff;
+  color: #4f596d;
+  padding: 10px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dp-login__toast {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(12, 18, 30, 0.24);
+  z-index: 100;
+}
+
+.dp-login__toast--error { background: #de4e63; }
+.dp-login__toast--info { background: #4e89de; }
+.dp-login__toast--success { background: #3ca77e; }

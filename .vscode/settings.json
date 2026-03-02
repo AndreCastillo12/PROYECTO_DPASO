@@ -1,0 +1,13 @@
+{
+  "deno.enable": true,
+  "deno.enablePaths": [
+    "PROYECTO_DPASO/Carta-Dpaso-main/supabase/functions"
+  ],
+  "deno.disablePaths": [
+    "PROYECTO_DPASO/dpaso-admin"
+  ],
+  "deno.lint": true,
+  "deno.unstable": true,
+  "typescript.validate.enable": true,
+  "javascript.validate.enable": true
+}
