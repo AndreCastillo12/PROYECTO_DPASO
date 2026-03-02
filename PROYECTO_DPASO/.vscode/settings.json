@@ -1,0 +1,13 @@
+{
+  "deno.enable": true,
+  "deno.enablePaths": [
+    "Carta-Dpaso-main/supabase/functions"
+  ],
+  "deno.disablePaths": [
+    "dpaso-admin"
+  ],
+  "deno.lint": true,
+  "deno.unstable": true,
+  "typescript.validate.enable": true,
+  "javascript.validate.enable": true
+}
