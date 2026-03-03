@@ -109,3 +109,56 @@ Si llega correo genérico de Supabase, hay que configurarlo en Supabase Dashboar
 2. **Auth -> SMTP Settings**: configurar proveedor SMTP propio + remitente de tu dominio.
 
 Esto no se controla desde el frontend.
+
+## Checklist de configuración Auth (Supabase + Vercel)
+
+### 1) URLs de Auth en Supabase (obligatorio)
+En **Supabase Dashboard -> Authentication -> URL Configuration**:
+
+- **Site URL**
+  - `https://admin.dpasococinalibre.com`
+- **Redirect URLs**
+  - `https://admin.dpasococinalibre.com`
+  - `https://admin.dpasococinalibre.com/reset-password`
+  - `https://dpasococinalibre.com/reset-password`
+
+> Si falta alguna URL, el flujo de recovery puede abrir pantalla pero fallar al actualizar contraseña por sesión inválida o intercambio incompleto.
+
+### 2) Variables del frontend admin
+En Vercel (proyecto admin) define:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_AUTH_RESET_REDIRECT_URL=https://admin.dpasococinalibre.com/reset-password`
+
+### 3) Recovery flow correcto
+El frontend de reset debe aceptar cualquiera de estos formatos del enlace de Supabase:
+
+- `?code=...` -> usar `exchangeCodeForSession(code)`.
+- `?token_hash=...&type=recovery` -> usar `verifyOtp(...)`.
+- `#access_token=...&refresh_token=...` (legacy) -> usar `setSession(...)`.
+
+Luego validar `getSession()` antes de `updateUser({ password })`.
+
+### 4) Vercel SPA rewrite (admin)
+Mantener `dpaso-admin/vercel.json` con rewrite global a `index.html` para evitar 404 al refrescar:
+
+- `/login`
+- `/reset-password`
+- rutas internas del panel
+
+### 5) Plantillas premium de Auth (Supabase)
+Archivos listos para copiar/pegar en Supabase:
+
+- Confirm signup: `dpaso-admin/docs/auth-email-templates/confirm-signup.html`
+- Reset password: `dpaso-admin/docs/auth-email-templates/reset-password.html`
+
+En **Authentication -> Templates** pega cada HTML en su template correspondiente.
+
+### 6) SMTP branding propio
+En **Authentication -> SMTP Settings** ya debes mantener:
+
+- Remitente: `DPASO <no-reply@dpasococinalibre.com>`
+- Proveedor SMTP propio (Resend)
+
+Así dejas de enviar correos con branding genérico de Supabase.

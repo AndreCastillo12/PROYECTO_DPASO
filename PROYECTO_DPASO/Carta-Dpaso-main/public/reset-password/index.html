@@ -89,6 +89,27 @@
       feedback.className = `checkout-feedback ${type}`;
     }
 
+    function debugResetError(label, error) {
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        console.error(label, {
+          message: error?.message,
+          status: error?.status,
+          code: error?.code
+        });
+      }
+    }
+
+    function getFriendlyResetError(error, fallback = 'Ocurrió un error, intenta nuevamente.') {
+      const msg = String(error?.message || '').toLowerCase();
+      if (msg.includes('rate limit') || msg.includes('too many requests')) {
+        return 'Se realizaron demasiadas solicitudes. Intenta en unos minutos.';
+      }
+      if (msg.includes('expired') || msg.includes('invalid') || msg.includes('otp')) {
+        return 'El enlace es inválido o expiró. Solicita uno nuevo.';
+      }
+      return fallback;
+    }
+
     function validateForm() {
       const password = String(passwordInput.value || '');
       const confirm = String(confirmInput.value || '');
@@ -124,36 +145,50 @@
     async function ensureRecoverySession() {
       const params = new URLSearchParams(window.location.search);
       const hashParams = new URLSearchParams(String(window.location.hash || '').replace(/^#/, ''));
+      const code = params.get('code');
       const tokenHash = params.get('token_hash');
       const type = params.get('type');
+      const accessToken = hashParams.get('access_token');
+      const refreshToken = hashParams.get('refresh_token');
       const hashErrorCode = String(hashParams.get('error_code') || '').toLowerCase();
       const hashError = String(hashParams.get('error') || '').toLowerCase();
 
-      if (hashErrorCode === 'otp_expired' || hashError === 'access_denied') {
-        resetLinkValid = false;
-      } else {
-        try {
-          if (tokenHash && type === 'recovery') {
-            const { error } = await supabaseClient.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash });
-            if (error) throw error;
-          }
+      setFeedback('Validando enlace de recuperación...', 'info');
 
-          const { data, error } = await supabaseClient.auth.getSession();
-          if (error) throw error;
-
-          resetLinkValid = Boolean(data?.session);
-        } catch (error) {
-          console.error('Error validando enlace de recovery:', {
-            message: error?.message,
-            status: error?.status,
-            code: error?.code
-          });
-          resetLinkValid = false;
+      try {
+        if (hashErrorCode === 'otp_expired' || hashError === 'access_denied') {
+          throw new Error('recovery_link_expired');
         }
+
+        if (code) {
+          const { error } = await supabaseClient.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+        } else if (tokenHash && type === 'recovery') {
+          const { error } = await supabaseClient.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash });
+          if (error) throw error;
+        } else if (accessToken && refreshToken) {
+          const { error } = await supabaseClient.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+          });
+          if (error) throw error;
+        }
+
+        const { data, error } = await supabaseClient.auth.getSession();
+        if (error) throw error;
+
+        resetLinkValid = Boolean(data?.session);
+        if (!resetLinkValid) throw new Error('missing_recovery_session');
+
+        setFeedback('Enlace validado. Ya puedes cambiar tu contraseña.', 'success');
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch (error) {
+        debugResetError('Error validando enlace de recovery:', error);
+        resetLinkValid = false;
       }
 
       if (!resetLinkValid) {
-        setFeedback('Enlace inválido o expirado.', 'error');
+        setFeedback(getFriendlyResetError({ message: 'invalid_or_expired' }, 'Enlace inválido o expirado.'), 'error');
         resetDescription.textContent = 'Solicita un nuevo enlace para recuperar tu contraseña.';
         invalidActions.style.display = 'block';
         resetForm.querySelectorAll('input,button').forEach((el) => { el.disabled = true; });
@@ -201,12 +236,8 @@
         setFeedback('Contraseña actualizada.', 'success');
         setTimeout(() => { window.location.href = '../index.html'; }, 1200);
       } catch (error) {
-        console.error('Error actualizando contraseña:', {
-          message: error?.message,
-          status: error?.status,
-          code: error?.code
-        });
-        setFeedback('Ocurrió un error, intenta nuevamente.', 'error');
+        debugResetError('Error actualizando contraseña:', error);
+        setFeedback(getFriendlyResetError(error), 'error');
       } finally {
         resetBusy = false;
         submitBtn.textContent = previousText;
