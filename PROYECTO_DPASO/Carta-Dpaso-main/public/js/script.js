@@ -1035,13 +1035,8 @@ function buildWhatsAppMessage(orderData) {
 async function sendReceiptEmail(orderData, { trigger = 'manual' } = {}) {
   if (!orderData?.id) return { ok: false, reason: 'ORDER_ID_REQUIRED' };
 
-  const receiptEmail = normalizeEmail(orderData.email || appRuntime.lastAuthEmail || '');
   const receiptToken = String(orderData.receipt_token || '').trim();
 
-  if (!receiptEmail) {
-    if (trigger === 'manual') showFeedback('No hay correo válido para enviar el comprobante.', 'error');
-    return { ok: false, reason: 'EMAIL_REQUIRED' };
-  }
   if (!receiptToken) {
     if (trigger === 'manual') showFeedback('No se encontró token de seguridad del comprobante.', 'error');
     return { ok: false, reason: 'TOKEN_REQUIRED' };
@@ -1061,7 +1056,6 @@ async function sendReceiptEmail(orderData, { trigger = 'manual' } = {}) {
     const functionName = 'send-receipt';
     const invokePayload = {
       order_id: orderData.id,
-      email: receiptEmail,
       token: receiptToken
     };
 
@@ -1126,8 +1120,19 @@ async function sendReceiptEmail(orderData, { trigger = 'manual' } = {}) {
       error = null;
     }
 
-    showCartToast(`📧 Comprobante enviado a ${receiptEmail}`);
-    if (trigger === 'manual') showFeedback(`Comprobante enviado al correo ${receiptEmail}.`, 'success');
+    const customerStatus = String(data?.customer_status || 'unknown');
+    if (customerStatus === 'sent') {
+      const resolvedEmail = normalizeEmail(orderData.email || appRuntime.lastAuthEmail || '');
+      if (resolvedEmail) showCartToast(`📧 Comprobante enviado a ${resolvedEmail}`);
+      if (trigger === 'manual') showFeedback('Comprobante enviado al cliente y notificación interna registrada.', 'success');
+    } else if (customerStatus === 'skipped') {
+      showCartToast('📨 Notificación interna enviada');
+      if (trigger === 'manual') showFeedback('No había correo válido del cliente. Se envió solo la notificación interna.', 'success');
+    } else {
+      showCartToast('📨 Proceso de correo ejecutado');
+      if (trigger === 'manual') showFeedback('Se procesó el envío de correos. Revisa el estado en logs.', 'success');
+    }
+
     return { ok: true, data };
   } catch (error) {
     console.error('❌ Error enviando comprobante por Edge Function:', {
@@ -1978,18 +1983,16 @@ async function submitOrder(eventOrForm) {
     const receiptEmail = emailRaw || normalizeEmail(appRuntime.lastAuthEmail || '');
     const receiptToken = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    if (receiptEmail) {
-      const { error: receiptDataError } = await withTimeout(
-        supabaseClient.rpc('set_order_receipt_data', {
-          p_order_id: orderId,
-          p_email: receiptEmail,
-          p_token: receiptToken
-        }),
-        8000,
-        'No se pudo guardar token de comprobante a tiempo.'
-      );
-      if (receiptDataError) throw receiptDataError;
-    }
+    const { error: receiptDataError } = await withTimeout(
+      supabaseClient.rpc('set_order_receipt_data', {
+        p_order_id: orderId,
+        p_email: receiptEmail || null,
+        p_token: receiptToken
+      }),
+      8000,
+      'No se pudo guardar token de comprobante a tiempo.'
+    );
+    if (receiptDataError) throw receiptDataError;
 
     lastOrderData = {
       id: orderId,
@@ -2002,7 +2005,7 @@ async function submitOrder(eventOrForm) {
       referencia: referenciaRaw,
       comentario: comentarioRaw,
       email: emailRaw || appRuntime.lastAuthEmail || '',
-      receipt_token: receiptEmail ? receiptToken : '',
+      receipt_token: receiptToken,
       total: totals.totalFinal,
       created_at: createdAt,
       subtotal: totals.subtotal,
