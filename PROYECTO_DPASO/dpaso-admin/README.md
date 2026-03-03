@@ -79,3 +79,33 @@ Si `create_internal_user`/`manage_internal_user` no están desplegadas:
 - El admin no se muestra a sí mismo en la lista de gestión.
 - Acciones disponibles para otros usuarios internos: cambiar rol, restablecer contraseña, deshabilitar/habilitar y eliminar cuenta completa.
 - Estas acciones requieren `manage_internal_user` desplegada (excepto cambios por RPC ya existentes como rol).
+
+## Producción (Vercel + Auth)
+
+### Evitar 404 al refrescar rutas (`/login`, `/reset-password`, etc.)
+Este panel usa `react-router` con `createBrowserRouter`, por lo que en Vercel se requiere rewrite global a `index.html`.
+
+Ya se incluye `vercel.json` con:
+
+```json
+{
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}
+```
+
+Sin ese rewrite, al hacer F5 en rutas internas Vercel responde `404: NOT_FOUND`.
+
+### Reset password en dominio admin
+Configura en el frontend:
+
+- `VITE_AUTH_RESET_REDIRECT_URL=https://admin.dpasococinalibre.com/reset-password`
+
+Y en Supabase Auth -> URL Configuration agrega esa URL a **Redirect URLs** permitidas.
+
+### Correo de recuperación con branding propio (no "powered by Supabase")
+Si llega correo genérico de Supabase, hay que configurarlo en Supabase Dashboard:
+
+1. **Auth -> Templates**: personalizar asunto/cuerpo para recovery/confirmación.
+2. **Auth -> SMTP Settings**: configurar proveedor SMTP propio + remitente de tu dominio.
+
+Esto no se controla desde el frontend.
