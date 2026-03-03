@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Restablecer contraseña | DPASO</title>
+  <link rel="icon" type="image/jpeg" href="../images/Logos/logo.jpg">
   <link rel="stylesheet" href="../css/styles.css">
 </head>
 <body>
@@ -107,6 +108,15 @@
       if (msg.includes('expired') || msg.includes('invalid') || msg.includes('otp')) {
         return 'El enlace es inválido o expiró. Solicita uno nuevo.';
       }
+      if (msg.includes('same') || msg.includes('different from the old') || msg.includes('new password should be different')) {
+        return 'La nueva contraseña debe ser distinta a la contraseña actual.';
+      }
+      if (msg.includes('weak password') || msg.includes('password should contain')) {
+        return 'La contraseña no cumple los requisitos de seguridad.';
+      }
+      if (msg.includes('auth session missing') || msg.includes('missing_recovery_session')) {
+        return 'Tu sesión de recuperación expiró. Solicita un nuevo enlace.';
+      }
       return fallback;
     }
 
@@ -155,6 +165,8 @@
 
       setFeedback('Validando enlace de recuperación...', 'info');
 
+      let lastError = null;
+
       try {
         if (hashErrorCode === 'otp_expired' || hashError === 'access_denied') {
           throw new Error('recovery_link_expired');
@@ -181,14 +193,14 @@
         if (!resetLinkValid) throw new Error('missing_recovery_session');
 
         setFeedback('Enlace validado. Ya puedes cambiar tu contraseña.', 'success');
-        window.history.replaceState({}, '', window.location.pathname);
       } catch (error) {
         debugResetError('Error validando enlace de recovery:', error);
+        lastError = error;
         resetLinkValid = false;
       }
 
       if (!resetLinkValid) {
-        setFeedback(getFriendlyResetError({ message: 'invalid_or_expired' }, 'Enlace inválido o expirado.'), 'error');
+        setFeedback(getFriendlyResetError(lastError, 'Enlace inválido o expirado.'), 'error');
         resetDescription.textContent = 'Solicita un nuevo enlace para recuperar tu contraseña.';
         invalidActions.style.display = 'block';
         resetForm.querySelectorAll('input,button').forEach((el) => { el.disabled = true; });
@@ -221,6 +233,10 @@
       try {
         const newPassword = String(passwordInput.value || '');
 
+        const { data: currentSession, error: currentSessionError } = await supabaseClient.auth.getSession();
+        if (currentSessionError) throw currentSessionError;
+        if (!currentSession?.session) throw new Error('missing_recovery_session');
+
         let skipHistoryValidation = false;
         const historyCheck = await supabaseClient.rpc('is_password_reused_last_three', { p_password: newPassword });
         if (historyCheck.error) {
@@ -242,6 +258,7 @@
         }
 
         setFeedback('Contraseña actualizada.', 'success');
+        window.history.replaceState({}, '', window.location.pathname);
         setTimeout(() => { window.location.href = '../index.html'; }, 1200);
       } catch (error) {
         debugResetError('Error actualizando contraseña:', error);

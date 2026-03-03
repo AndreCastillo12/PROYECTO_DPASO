@@ -3397,7 +3397,7 @@ function setupAuthEvents() {
       });
       if (error) throw error;
       if (feedback) {
-        feedback.textContent = 'Si el correo está registrado, te enviaremos un enlace para cambiar tu contraseña. Revisa spam/promociones.';
+        feedback.textContent = 'Enlace enviado con éxito. Revisa tu bandeja y spam/promociones.';
         feedback.className = 'checkout-feedback success';
       }
     } catch (error) {
