@@ -1,6 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import "./index.css";
+import "./styles/global.css";
+import "./styles/layout.css";
 
 import AdminLayout from "./layouts/AdminLayout";
 import Platos from "./pages/Platos";

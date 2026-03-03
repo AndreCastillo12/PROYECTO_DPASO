@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { FiMapPin, FiPhone, FiTruck } from "react-icons/fi";
 import { supabase } from "../lib/supabaseClient";
-import "../styles/order-detail-sedap.css";
+import "../styles/order-detail.css";
 
 const ORDER_STATUS = ["pending", "accepted", "preparing", "ready", "dispatched", "delivered", "cancelled"];
 

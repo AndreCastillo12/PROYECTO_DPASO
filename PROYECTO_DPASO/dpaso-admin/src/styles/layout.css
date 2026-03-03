@@ -1,27 +1,18 @@
-.layout {
+/* Estructura base para layout de páginas */
+.page-shell {
   display: flex;
-  min-height: 100vh;
+  flex-direction: column;
+  gap: 12px;
 }
-.sidebar {
-  width: 220px;
-  background: #111827;
-  color: white;
-  padding: 20px;
-}
-.sidebar a {
-  display: block;
-  color: #cbd5e1;
-  margin: 10px 0;
-}
-.main {
-  flex: 1;
-}
-.header {
-  background: white;
-  padding: 15px;
+
+.page-header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
-.content {
-  padding: 20px;
+
+.page-content {
+  display: grid;
+  gap: 12px;
 }

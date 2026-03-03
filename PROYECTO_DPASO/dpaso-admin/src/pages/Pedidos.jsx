@@ -6,7 +6,7 @@ import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import useAdminPreferences from "../hooks/useAdminPreferences";
 import { OPERATION_MESSAGES, resolveErrorMessage } from "../utils/operationMessages";
-import "../styles/pedidos-sedap.css";
+import "../styles/pedidos.css";
 
 const ORDER_STATUS = ["pending", "accepted", "preparing", "ready", "dispatched", "delivered", "cancelled"];
 const STATUS_META = {

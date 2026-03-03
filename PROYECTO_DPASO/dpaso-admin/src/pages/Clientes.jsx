@@ -5,7 +5,7 @@ import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import useAdminPreferences from "../hooks/useAdminPreferences";
 import { OPERATION_MESSAGES, resolveErrorMessage } from "../utils/operationMessages";
-import "../styles/clientes-sedap.css";
+import "../styles/clientes.css";
 
 function money(value) {
   return `S/ ${Number(value || 0).toFixed(2)}`;

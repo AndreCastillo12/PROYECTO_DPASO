@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FiBarChart2, FiClipboard, FiDollarSign, FiShoppingBag } from "react-icons/fi";
 import { supabase } from "../lib/supabaseClient";
-import "../styles/dashboard-sedap.css";
+import "../styles/dashboard.css";
 
 const TOP_WINDOWS = [
   { label: "Hoy", days: 1 },

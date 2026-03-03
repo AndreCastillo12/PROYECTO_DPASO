@@ -1,5 +1,30 @@
-body {
-  margin: 0;
-  font-family: system-ui;
-  background: #f4f6f8;
+/* Estilos globales de elementos básicos y utilidades compartidas */
+a {
+  color: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+.text-muted {
+  color: var(--text-secondary);
+}
+
+.surface-card {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
 }

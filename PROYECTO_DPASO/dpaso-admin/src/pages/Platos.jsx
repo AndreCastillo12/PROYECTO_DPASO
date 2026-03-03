@@ -6,7 +6,7 @@ import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import ConfirmModal from "../components/ConfirmModal";
 import LoadingOverlay from "../components/LoadingOverlay";
-import "../styles/platos-sedap.css";
+import "../styles/platos.css";
 
 function normalizeStockValue(value) {
   if (value === "" || value == null) return 0;

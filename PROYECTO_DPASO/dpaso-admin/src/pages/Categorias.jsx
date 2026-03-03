@@ -5,7 +5,7 @@ import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import ConfirmModal from "../components/ConfirmModal";
 import LoadingOverlay from "../components/LoadingOverlay";
-import "../styles/categorias-sedap.css";
+import "../styles/categorias.css";
 
 export default function Categorias() {
   const [categorias, setCategorias] = useState([]);
