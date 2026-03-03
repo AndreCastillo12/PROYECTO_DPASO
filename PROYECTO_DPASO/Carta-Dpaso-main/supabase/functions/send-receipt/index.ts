@@ -2,15 +2,19 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-secret',
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
 type ReceiptInput = {
   order_id?: string;
-  email?: string;
   token?: string;
+  record?: {
+    id?: string;
+  };
 };
+
+type DeliveryStatus = 'sent' | 'failed' | 'skipped';
 
 function isValidEmail(email = '') {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -23,6 +27,40 @@ function escapeHtml(input = '') {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+async function sendResendEmail(params: {
+  apiKey: string;
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+}) {
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${params.apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: params.from,
+      to: [params.to],
+      subject: params.subject,
+      html: params.html,
+      text: params.text
+    })
+  });
+
+  const body = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, body };
+}
+
+function resolveCustomerEmail(order: Record<string, unknown> | null) {
+  const orderCustomerEmail = String(order?.customer_email || '').trim().toLowerCase();
+  const orderEmail = String(order?.email || '').trim().toLowerCase();
+  const orderReceiptEmail = String(order?.receipt_email || '').trim().toLowerCase();
+  return orderCustomerEmail || orderEmail || orderReceiptEmail;
 }
 
 Deno.serve(async (req) => {
@@ -41,7 +79,9 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
-    const RESEND_FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL') ?? 'DPASO <onboarding@resend.dev>';
+    const ORDERS_NOTIFY_EMAIL = String(Deno.env.get('ORDERS_NOTIFY_EMAIL') ?? '').trim().toLowerCase();
+    const INTERNAL_WEBHOOK_SECRET = String(Deno.env.get('INTERNAL_WEBHOOK_SECRET') ?? '').trim();
+    const RESEND_FROM_EMAIL = String(Deno.env.get('RESEND_FROM_EMAIL') ?? '').trim() || 'DPASO <no-reply@dpasococinalibre.com>';
 
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
       throw new Error('SUPABASE_ENV_MISSING');
@@ -51,27 +91,17 @@ Deno.serve(async (req) => {
       throw new Error('RESEND_API_KEY_MISSING');
     }
 
+    if (!isValidEmail(ORDERS_NOTIFY_EMAIL)) {
+      throw new Error('ORDERS_NOTIFY_EMAIL_MISSING_OR_INVALID');
+    }
+
     const payload = (await req.json()) as ReceiptInput;
-    const orderId = String(payload?.order_id || '').trim();
-    const email = String(payload?.email || '').trim().toLowerCase();
+    const isWebhookInvocation = Boolean(payload?.record?.id);
+    const orderId = String(payload?.order_id || payload?.record?.id || '').trim();
     const token = String(payload?.token || '').trim();
 
     if (!orderId) {
       return new Response(JSON.stringify({ error: 'ORDER_ID_REQUIRED' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    if (!isValidEmail(email)) {
-      return new Response(JSON.stringify({ error: 'INVALID_EMAIL' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    if (!token) {
-      return new Response(JSON.stringify({ error: 'INVALID_TOKEN' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -83,7 +113,7 @@ Deno.serve(async (req) => {
 
     const { data: order, error: orderError } = await supabase
       .from('orders')
-      .select('id,short_code,nombre_cliente,telefono,modalidad,direccion,referencia,total,subtotal,delivery_fee,provincia,distrito,created_at,receipt_token')
+      .select('id,short_code,nombre_cliente,telefono,modalidad,direccion,referencia,total,subtotal,delivery_fee,provincia,distrito,created_at,receipt_token,customer_email,email,receipt_email')
       .eq('id', orderId)
       .maybeSingle();
 
@@ -95,11 +125,29 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (String(order.receipt_token || '') !== token) {
-      return new Response(JSON.stringify({ error: 'INVALID_TOKEN' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+    const orderReceiptToken = String(order.receipt_token || '').trim();
+    const internalHeaderSecret = String(req.headers.get('x-internal-secret') || '').trim();
+    const hasValidInternalSecret = Boolean(
+      isWebhookInvocation
+      && INTERNAL_WEBHOOK_SECRET
+      && internalHeaderSecret
+      && internalHeaderSecret === INTERNAL_WEBHOOK_SECRET
+    );
+
+    if (!isWebhookInvocation) {
+      if (!token || token !== orderReceiptToken) {
+        return new Response(JSON.stringify({ error: 'INVALID_TOKEN' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+    } else if (!hasValidInternalSecret) {
+      if (!token || token !== orderReceiptToken) {
+        return new Response(JSON.stringify({ error: 'INVALID_TOKEN' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
     }
 
     const { data: items, error: itemsError } = await supabase
@@ -110,6 +158,7 @@ Deno.serve(async (req) => {
 
     if (itemsError) throw itemsError;
 
+    const customerEmail = resolveCustomerEmail(order as Record<string, unknown>);
     const safeItems = (items || []).map((item) => ({
       nombre: escapeHtml(item.nombre_snapshot || ''),
       cantidad: Number(item.cantidad || 0),
@@ -145,53 +194,104 @@ Deno.serve(async (req) => {
       </div>
     `;
 
-    const resendResponse = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
+    const internalHtml = `
+      <div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.4;max-width:680px;margin:0 auto;">
+        <h2 style="color:#0b2d4d;margin-bottom:6px;">DPASO · Nuevo pedido</h2>
+        <p style="margin:0 0 12px;">Se registró el pedido <strong>#${escapeHtml(shortCode)}</strong>.</p>
+        ${html}
+      </div>
+    `;
+
+    let customerStatus: DeliveryStatus = 'skipped';
+    let customerError: string | null = null;
+
+    if (isValidEmail(customerEmail)) {
+      const customerResult = await sendResendEmail({
+        apiKey: RESEND_API_KEY,
         from: RESEND_FROM_EMAIL,
-        to: [email],
+        to: customerEmail,
         subject: `Comprobante DPASO #${shortCode}`,
         html,
         text: `DPASO - Comprobante #${shortCode}\nTotal: S/ ${total.toFixed(2)}`
-      })
+      });
+
+      if (customerResult.ok) {
+        customerStatus = 'sent';
+        console.log('[send-receipt] Correo enviado al cliente', {
+          order_id: orderId,
+          customer_email: customerEmail,
+          resend_status: customerResult.status
+        });
+      } else {
+        customerStatus = 'failed';
+        customerError = JSON.stringify(customerResult.body || {}).slice(0, 1400);
+      }
+    } else {
+      customerStatus = 'skipped';
+      customerError = 'CUSTOMER_EMAIL_MISSING_OR_INVALID';
+      console.warn('[send-receipt] Email de cliente ausente o inválido; se omite envío al cliente', {
+        order_id: orderId,
+        raw_customer_email: customerEmail || null
+      });
+    }
+
+    const internalResult = await sendResendEmail({
+      apiKey: RESEND_API_KEY,
+      from: RESEND_FROM_EMAIL,
+      to: ORDERS_NOTIFY_EMAIL,
+      subject: `Nuevo pedido DPASO #${shortCode}`,
+      html: internalHtml,
+      text: `Nuevo pedido #${shortCode}\nCliente: ${String(order.nombre_cliente || '-')}`
     });
 
-    const resendBody = await resendResponse.json().catch(() => ({}));
+    const internalStatus: Exclude<DeliveryStatus, 'skipped'> = internalResult.ok ? 'sent' : 'failed';
+    const internalError = internalResult.ok ? null : JSON.stringify(internalResult.body || {}).slice(0, 1400);
 
-    if (!resendResponse.ok) {
-      const resendError = JSON.stringify(resendBody || {}).slice(0, 1400);
-      await supabase
-        .from('orders')
-        .update({
-          receipt_email: email,
-          receipt_send_status: 'failed',
-          receipt_last_attempt_at: new Date().toISOString(),
-          receipt_send_error: resendError
-        })
-        .eq('id', orderId);
+    if (internalResult.ok) {
+      console.log('[send-receipt] Correo interno enviado', {
+        order_id: orderId,
+        notify_email: ORDERS_NOTIFY_EMAIL,
+        resend_status: internalResult.status
+      });
+    }
 
-      return new Response(JSON.stringify({ error: 'RESEND_ERROR', details: resendBody }), {
+    const legacyStatus = internalResult.ok ? 'sent' : (customerStatus === 'sent' ? 'sent' : 'failed');
+    const legacyError = [customerError, internalError].filter(Boolean).join(' | ') || null;
+
+    await supabase
+      .from('orders')
+      .update({
+        receipt_email: isValidEmail(customerEmail) ? customerEmail : null,
+        receipt_send_status: legacyStatus,
+        receipt_last_attempt_at: new Date().toISOString(),
+        receipt_sent_at: internalResult.ok || customerStatus === 'sent' ? new Date().toISOString() : null,
+        receipt_send_error: legacyError,
+        receipt_send_status_customer: customerStatus,
+        receipt_send_status_internal: internalStatus,
+        receipt_send_error_customer: customerError,
+        receipt_send_error_internal: internalError
+      })
+      .eq('id', orderId);
+
+    if (!internalResult.ok) {
+      return new Response(JSON.stringify({
+        error: 'RESEND_ERROR_INTERNAL',
+        details: internalResult.body,
+        customer_status: customerStatus,
+        customer_error: customerError
+      }), {
         status: 502,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    await supabase
-      .from('orders')
-      .update({
-        receipt_email: email,
-        receipt_send_status: 'sent',
-        receipt_last_attempt_at: new Date().toISOString(),
-        receipt_sent_at: new Date().toISOString(),
-        receipt_send_error: null
-      })
-      .eq('id', orderId);
-
-    return new Response(JSON.stringify({ ok: true, provider: 'resend', result: resendBody }), {
+    return new Response(JSON.stringify({
+      ok: true,
+      provider: 'resend',
+      customer_status: customerStatus,
+      customer_error: customerError,
+      internal_status: internalStatus
+    }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
