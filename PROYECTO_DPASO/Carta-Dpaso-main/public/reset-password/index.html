@@ -220,9 +220,13 @@
 
       try {
         const newPassword = String(passwordInput.value || '');
+
+        let skipHistoryValidation = false;
         const historyCheck = await supabaseClient.rpc('is_password_reused_last_three', { p_password: newPassword });
-        if (historyCheck.error) throw historyCheck.error;
-        if (historyCheck.data === true) {
+        if (historyCheck.error) {
+          skipHistoryValidation = true;
+          debugResetError('No se pudo validar historial de contraseña (continuando con updateUser):', historyCheck.error);
+        } else if (historyCheck.data === true) {
           setFeedback('La nueva contraseña no puede ser igual a tus 3 contraseñas anteriores.', 'error');
           return;
         }
@@ -230,8 +234,12 @@
         const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
         if (error) throw error;
 
-        const remember = await supabaseClient.rpc('remember_password_history', { p_password: newPassword });
-        if (remember.error) throw remember.error;
+        if (!skipHistoryValidation) {
+          const remember = await supabaseClient.rpc('remember_password_history', { p_password: newPassword });
+          if (remember.error) {
+            debugResetError('No se pudo guardar historial de contraseña (no bloquea el cambio):', remember.error);
+          }
+        }
 
         setFeedback('Contraseña actualizada.', 'success');
         setTimeout(() => { window.location.href = '../index.html'; }, 1200);
