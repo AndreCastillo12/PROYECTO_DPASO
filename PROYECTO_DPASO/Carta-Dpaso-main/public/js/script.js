@@ -1983,18 +1983,16 @@ async function submitOrder(eventOrForm) {
     const receiptEmail = emailRaw || normalizeEmail(appRuntime.lastAuthEmail || '');
     const receiptToken = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    if (receiptEmail) {
-      const { error: receiptDataError } = await withTimeout(
-        supabaseClient.rpc('set_order_receipt_data', {
-          p_order_id: orderId,
-          p_email: receiptEmail,
-          p_token: receiptToken
-        }),
-        8000,
-        'No se pudo guardar token de comprobante a tiempo.'
-      );
-      if (receiptDataError) throw receiptDataError;
-    }
+    const { error: receiptDataError } = await withTimeout(
+      supabaseClient.rpc('set_order_receipt_data', {
+        p_order_id: orderId,
+        p_email: receiptEmail || null,
+        p_token: receiptToken
+      }),
+      8000,
+      'No se pudo guardar token de comprobante a tiempo.'
+    );
+    if (receiptDataError) throw receiptDataError;
 
     lastOrderData = {
       id: orderId,
@@ -2007,7 +2005,7 @@ async function submitOrder(eventOrForm) {
       referencia: referenciaRaw,
       comentario: comentarioRaw,
       email: emailRaw || appRuntime.lastAuthEmail || '',
-      receipt_token: receiptEmail ? receiptToken : '',
+      receipt_token: receiptToken,
       total: totals.totalFinal,
       created_at: createdAt,
       subtotal: totals.subtotal,

@@ -16,6 +16,12 @@ type ReceiptInput = {
 
 type DeliveryStatus = 'sent' | 'failed' | 'skipped';
 
+type ResendResult = {
+  ok: boolean;
+  status: number;
+  body: unknown;
+};
+
 function isValidEmail(email = '') {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -29,6 +35,12 @@ function escapeHtml(input = '') {
     .replaceAll("'", '&#039;');
 }
 
+function truncateForLog(value: unknown, max = 1200) {
+  const asString = typeof value === 'string' ? value : JSON.stringify(value ?? {});
+  if (!asString) return '';
+  return asString.length > max ? `${asString.slice(0, max)}...[truncated]` : asString;
+}
+
 async function sendResendEmail(params: {
   apiKey: string;
   from: string;
@@ -36,7 +48,7 @@ async function sendResendEmail(params: {
   subject: string;
   html: string;
   text: string;
-}) {
+}): Promise<ResendResult> {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -57,10 +69,41 @@ async function sendResendEmail(params: {
 }
 
 function resolveCustomerEmail(order: Record<string, unknown> | null) {
-  const orderCustomerEmail = String(order?.customer_email || '').trim().toLowerCase();
   const orderEmail = String(order?.email || '').trim().toLowerCase();
   const orderReceiptEmail = String(order?.receipt_email || '').trim().toLowerCase();
-  return orderCustomerEmail || orderEmail || orderReceiptEmail;
+  return orderEmail || orderReceiptEmail;
+}
+
+async function updateOrderDeliveryStatus(
+  supabase: ReturnType<typeof createClient>,
+  orderId: string,
+  payload: Record<string, unknown>
+) {
+  const { error } = await supabase.from('orders').update(payload).eq('id', orderId);
+  if (!error) return;
+
+  const isMissingColumn =
+    error?.code === '42703' ||
+    String(error?.message || '').toLowerCase().includes('column') ||
+    String(error?.message || '').toLowerCase().includes('does not exist');
+
+  if (!isMissingColumn) throw error;
+
+  console.warn('[send-receipt] Fallback a update legacy por columnas ausentes', {
+    order_id: orderId,
+    original_error: truncateForLog({ code: error.code, message: error.message })
+  });
+
+  const legacyPayload: Record<string, unknown> = {
+    receipt_email: payload.receipt_email ?? null,
+    receipt_send_status: payload.receipt_send_status,
+    receipt_last_attempt_at: payload.receipt_last_attempt_at,
+    receipt_sent_at: payload.receipt_sent_at ?? null,
+    receipt_send_error: payload.receipt_send_error ?? null
+  };
+
+  const { error: legacyError } = await supabase.from('orders').update(legacyPayload).eq('id', orderId);
+  if (legacyError) throw legacyError;
 }
 
 Deno.serve(async (req) => {
@@ -83,6 +126,26 @@ Deno.serve(async (req) => {
     const INTERNAL_WEBHOOK_SECRET = String(Deno.env.get('INTERNAL_WEBHOOK_SECRET') ?? '').trim();
     const RESEND_FROM_EMAIL = String(Deno.env.get('RESEND_FROM_EMAIL') ?? '').trim() || 'DPASO <no-reply@dpasococinalibre.com>';
 
+    const payload = (await req.json()) as ReceiptInput;
+    const isWebhookInvocation = Boolean(payload?.record?.id);
+    const orderId = String(payload?.order_id || payload?.record?.id || '').trim();
+    const token = String(payload?.token || '').trim();
+
+    console.log('[send-receipt] Inicio', {
+      order_id: orderId || null,
+      has_token: Boolean(token),
+      is_webhook: isWebhookInvocation,
+      has_record_id: Boolean(payload?.record?.id),
+      secrets_present: {
+        has_supabase_url: Boolean(SUPABASE_URL),
+        has_service_role: Boolean(SUPABASE_SERVICE_ROLE_KEY),
+        has_resend_key: Boolean(RESEND_API_KEY),
+        has_notify_email: Boolean(ORDERS_NOTIFY_EMAIL),
+        has_internal_secret: Boolean(INTERNAL_WEBHOOK_SECRET),
+        has_from_email: Boolean(RESEND_FROM_EMAIL)
+      }
+    });
+
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
       throw new Error('SUPABASE_ENV_MISSING');
     }
@@ -94,11 +157,6 @@ Deno.serve(async (req) => {
     if (!isValidEmail(ORDERS_NOTIFY_EMAIL)) {
       throw new Error('ORDERS_NOTIFY_EMAIL_MISSING_OR_INVALID');
     }
-
-    const payload = (await req.json()) as ReceiptInput;
-    const isWebhookInvocation = Boolean(payload?.record?.id);
-    const orderId = String(payload?.order_id || payload?.record?.id || '').trim();
-    const token = String(payload?.token || '').trim();
 
     if (!orderId) {
       return new Response(JSON.stringify({ error: 'ORDER_ID_REQUIRED' }), {
@@ -113,9 +171,16 @@ Deno.serve(async (req) => {
 
     const { data: order, error: orderError } = await supabase
       .from('orders')
-      .select('id,short_code,nombre_cliente,telefono,modalidad,direccion,referencia,total,subtotal,delivery_fee,provincia,distrito,created_at,receipt_token,customer_email,email,receipt_email')
+      .select('id,short_code,nombre_cliente,telefono,modalidad,direccion,referencia,total,subtotal,delivery_fee,provincia,distrito,created_at,receipt_token,email,receipt_email')
       .eq('id', orderId)
       .maybeSingle();
+
+    console.log('[send-receipt] Resultado query order', {
+      order_id: orderId,
+      found: Boolean(order),
+      has_order_error: Boolean(orderError),
+      order_error: orderError ? truncateForLog({ code: orderError.code, message: orderError.message }) : null
+    });
 
     if (orderError) throw orderError;
     if (!order) {
@@ -141,13 +206,11 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
-    } else if (!hasValidInternalSecret) {
-      if (!token || token !== orderReceiptToken) {
-        return new Response(JSON.stringify({ error: 'INVALID_TOKEN' }), {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
+    } else if (!hasValidInternalSecret && (!token || token !== orderReceiptToken)) {
+      return new Response(JSON.stringify({ error: 'INVALID_TOKEN' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
     const { data: items, error: itemsError } = await supabase
@@ -155,6 +218,13 @@ Deno.serve(async (req) => {
       .select('nombre_snapshot,precio_snapshot,cantidad,subtotal')
       .eq('order_id', orderId)
       .order('created_at', { ascending: true });
+
+    console.log('[send-receipt] Resultado query items', {
+      order_id: orderId,
+      count: Array.isArray(items) ? items.length : 0,
+      has_items_error: Boolean(itemsError),
+      items_error: itemsError ? truncateForLog({ code: itemsError.code, message: itemsError.message }) : null
+    });
 
     if (itemsError) throw itemsError;
 
@@ -215,6 +285,13 @@ Deno.serve(async (req) => {
         text: `DPASO - Comprobante #${shortCode}\nTotal: S/ ${total.toFixed(2)}`
       });
 
+      console.log('[send-receipt] Resend cliente', {
+        order_id: orderId,
+        status: customerResult.status,
+        ok: customerResult.ok,
+        body: truncateForLog(customerResult.body)
+      });
+
       if (customerResult.ok) {
         customerStatus = 'sent';
         console.log('[send-receipt] Correo enviado al cliente', {
@@ -224,7 +301,7 @@ Deno.serve(async (req) => {
         });
       } else {
         customerStatus = 'failed';
-        customerError = JSON.stringify(customerResult.body || {}).slice(0, 1400);
+        customerError = truncateForLog(customerResult.body, 1400);
       }
     } else {
       customerStatus = 'skipped';
@@ -244,8 +321,15 @@ Deno.serve(async (req) => {
       text: `Nuevo pedido #${shortCode}\nCliente: ${String(order.nombre_cliente || '-')}`
     });
 
+    console.log('[send-receipt] Resend interno', {
+      order_id: orderId,
+      status: internalResult.status,
+      ok: internalResult.ok,
+      body: truncateForLog(internalResult.body)
+    });
+
     const internalStatus: Exclude<DeliveryStatus, 'skipped'> = internalResult.ok ? 'sent' : 'failed';
-    const internalError = internalResult.ok ? null : JSON.stringify(internalResult.body || {}).slice(0, 1400);
+    const internalError = internalResult.ok ? null : truncateForLog(internalResult.body, 1400);
 
     if (internalResult.ok) {
       console.log('[send-receipt] Correo interno enviado', {
@@ -258,20 +342,17 @@ Deno.serve(async (req) => {
     const legacyStatus = internalResult.ok ? 'sent' : (customerStatus === 'sent' ? 'sent' : 'failed');
     const legacyError = [customerError, internalError].filter(Boolean).join(' | ') || null;
 
-    await supabase
-      .from('orders')
-      .update({
-        receipt_email: isValidEmail(customerEmail) ? customerEmail : null,
-        receipt_send_status: legacyStatus,
-        receipt_last_attempt_at: new Date().toISOString(),
-        receipt_sent_at: internalResult.ok || customerStatus === 'sent' ? new Date().toISOString() : null,
-        receipt_send_error: legacyError,
-        receipt_send_status_customer: customerStatus,
-        receipt_send_status_internal: internalStatus,
-        receipt_send_error_customer: customerError,
-        receipt_send_error_internal: internalError
-      })
-      .eq('id', orderId);
+    await updateOrderDeliveryStatus(supabase, orderId, {
+      receipt_email: isValidEmail(customerEmail) ? customerEmail : null,
+      receipt_send_status: legacyStatus,
+      receipt_last_attempt_at: new Date().toISOString(),
+      receipt_sent_at: internalResult.ok || customerStatus === 'sent' ? new Date().toISOString() : null,
+      receipt_send_error: legacyError,
+      receipt_send_status_customer: customerStatus,
+      receipt_send_status_internal: internalStatus,
+      receipt_send_error_customer: customerError,
+      receipt_send_error_internal: internalError
+    });
 
     if (!internalResult.ok) {
       return new Response(JSON.stringify({
@@ -296,7 +377,15 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   } catch (error) {
-    return new Response(JSON.stringify({ error: 'UNEXPECTED_ERROR', details: String(error?.message || error) }), {
+    const err = error as Error & { stack?: string };
+    const details = {
+      message: String(err?.message || error),
+      stack: String(err?.stack || '').slice(0, 3500)
+    };
+
+    console.error('[send-receipt] UNEXPECTED_ERROR', details);
+
+    return new Response(JSON.stringify({ error: 'UNEXPECTED_ERROR', details }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
