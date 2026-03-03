@@ -70,12 +70,18 @@ export default function Login() {
   async function handleForgotPassword() {
     if (!email) return showToast("Ingresa tu correo", "error");
 
+    const resetRedirectUrl =
+      import.meta.env.VITE_AUTH_RESET_REDIRECT_URL || `${window.location.origin}/reset-password`;
+
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin + "/reset-password",
+      redirectTo: resetRedirectUrl,
     });
 
     if (error) {
-      await logCriticalEvent("auth_error", "admin_reset_password", error, { email });
+      await logCriticalEvent("auth_error", "admin_reset_password", error, { email, resetRedirectUrl });
+      if (error.message?.toLowerCase().includes("rate limit")) {
+        return showToast("Demasiadas solicitudes. Intenta nuevamente en unos minutos.", "error");
+      }
       showToast(error.message, "error");
     } else showToast("Revisa tu correo para restablecer tu contraseña");
   }
