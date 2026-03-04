@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { FiMapPin, FiPhone, FiTruck } from "react-icons/fi";
 import { supabase } from "../lib/supabaseClient";
 import "../styles/order-detail.css";
 
 const ORDER_STATUS = ["pending", "accepted", "preparing", "ready", "dispatched", "delivered", "cancelled"];
+const PAYMENT_METHODS = ["cash", "yape", "plin", "card", "transfer", "other"];
+const DOCUMENT_TYPES = ["boleta", "factura"];
+const CUSTOMER_DOC_TYPES = ["DNI", "RUC", "CE", "PASSPORT"];
 
 const NORMALIZED_STATUS = {
   completed: "delivered",
@@ -36,8 +39,6 @@ function getAllowedStatusChanges(order) {
   if (current !== "cancelled") next.push("cancelled");
   return next;
 }
-
-const PAYMENT_METHODS = ["cash", "yape", "plin", "card", "transfer", "other"];
 
 function humanStatus(status) {
   const map = {
@@ -91,6 +92,56 @@ function getDeliveryAddressLabel(order) {
   return order?.delivery_address || order?.direccion || order?.referencia || "Sin dirección";
 }
 
+function invoiceDocTypeLabel(documentType) {
+  return String(documentType || "").toLowerCase() === "factura" ? "FACTURA" : "BOLETA";
+}
+
+function getIssueErrorMessage(status, errorCodeOrDetail) {
+  const text = String(errorCodeOrDetail || "");
+  const upper = text.toUpperCase();
+
+  if (status === 401 || upper.includes("UNAUTHORIZED")) return "Sesión expirada. Vuelve a iniciar sesión en el panel.";
+  if (status === 403 || upper.includes("FORBIDDEN")) return "No tienes permisos para emitir comprobantes.";
+  if (status === 400 || upper.includes("ORDER_ID_REQUIRED")) return "Faltan datos obligatorios para emitir el comprobante.";
+  if (upper.includes("FACTURA_REQUIRES_VALID_RUC")) return "Para factura debes ingresar RUC válido (11 dígitos).";
+  if (upper.includes("ORDER_ITEMS_EMPTY")) return "El pedido no tiene ítems, no se puede emitir comprobante.";
+  if (upper.includes("CORRELATIVE_ASSIGN_FAILED")) return "No se pudo asignar serie/correlativo. Revisa la tabla de series SUNAT.";
+  if (status >= 500) return "Error interno al emitir. Intenta nuevamente o reintenta en unos minutos.";
+
+  return text || "No se pudo emitir el comprobante.";
+}
+
+function getInvoiceStatusTone(status) {
+  const key = String(status || "").toLowerCase();
+  if (["issued", "accepted", "already_issued"].includes(key)) return "success";
+  if (["error", "rejected"].includes(key)) return "error";
+  return "info";
+}
+
+function buildFullNumber(series, correlativo) {
+  if (!series || !Number.isFinite(Number(correlativo))) return "-";
+  return `${series}-${String(Number(correlativo)).padStart(8, "0")}`;
+}
+
+function mapOrderToInvoiceForm(order) {
+  const documentType = DOCUMENT_TYPES.includes(String(order?.document_type || "").toLowerCase())
+    ? String(order.document_type).toLowerCase()
+    : "boleta";
+
+  const customerDocType = CUSTOMER_DOC_TYPES.includes(String(order?.customer_doc_type || "").toUpperCase())
+    ? String(order.customer_doc_type).toUpperCase()
+    : documentType === "factura"
+      ? "RUC"
+      : "DNI";
+
+  return {
+    document_type: documentType,
+    customer_doc_type: customerDocType,
+    customer_doc_number: String(order?.customer_doc_number || "").trim(),
+    customer_name: String(order?.customer_name || order?.nombre_cliente || "").trim(),
+  };
+}
+
 export default function OrderDetail() {
   const [searchParams] = useSearchParams();
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -99,47 +150,56 @@ export default function OrderDetail() {
   const [updating, setUpdating] = useState(false);
   const [paymentError, setPaymentError] = useState("");
 
-  useEffect(() => {
-    let mounted = true;
+  const [invoiceForm, setInvoiceForm] = useState({
+    document_type: "boleta",
+    customer_doc_type: "DNI",
+    customer_doc_number: "",
+    customer_name: "",
+  });
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
+  const [queueBusy, setQueueBusy] = useState(false);
+  const [invoiceFeedback, setInvoiceFeedback] = useState({ type: "", text: "" });
+  const [ticketModalOpen, setTicketModalOpen] = useState(false);
 
-    async function run() {
-      setLoading(true);
-      const orderId = searchParams.get("order_id");
+  const fetchOrderAndItems = useCallback(async () => {
+    setLoading(true);
+    const orderId = searchParams.get("order_id");
 
-      const { data: orderRows } = orderId
-        ? await supabase.from("orders").select("*").eq("id", orderId).limit(1)
-        : await supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1);
+    const { data: orderRows } = orderId
+      ? await supabase.from("orders").select("*").eq("id", orderId).limit(1)
+      : await supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(1);
 
-      const current = orderRows?.[0] || null;
-      if (!mounted) return;
+    const current = orderRows?.[0] || null;
 
-      setSelectedOrder(current ? {
-        ...current,
-        payment_method: normalizePaymentMethod(current.payment_method),
-      } : null);
+    setSelectedOrder(current ? {
+      ...current,
+      payment_method: normalizePaymentMethod(current.payment_method),
+    } : null);
 
-      if (!current?.id) {
-        setOrderItems([]);
-        setLoading(false);
-        return;
-      }
-
-      const { data: itemsRows } = await supabase
-        .from("order_items")
-        .select("*")
-        .eq("order_id", current.id)
-        .order("created_at", { ascending: true });
-
-      if (!mounted) return;
-      setOrderItems(itemsRows || []);
+    if (!current?.id) {
+      setOrderItems([]);
       setLoading(false);
+      return;
     }
 
-    run();
-    return () => {
-      mounted = false;
-    };
+    const { data: itemsRows } = await supabase
+      .from("order_items")
+      .select("*")
+      .eq("order_id", current.id)
+      .order("created_at", { ascending: true });
+
+    setOrderItems(itemsRows || []);
+    setLoading(false);
   }, [searchParams]);
+
+  useEffect(() => {
+    fetchOrderAndItems();
+  }, [fetchOrderAndItems]);
+
+  useEffect(() => {
+    if (!selectedOrder) return;
+    setInvoiceForm(mapOrderToInvoiceForm(selectedOrder));
+  }, [selectedOrder]);
 
   const subtotal = useMemo(() => orderItems.reduce((acc, item) => acc + Number(item.subtotal || 0), 0), [orderItems]);
 
@@ -256,11 +316,143 @@ export default function OrderDetail() {
     window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`, "_blank", "noopener,noreferrer");
   };
 
+  const runQueueInvoice = async () => {
+    if (!selectedOrder?.id) return null;
+
+    const idempotencyKey = `${selectedOrder.id}-${Date.now()}`;
+    const payload = {
+      p_order_id: selectedOrder.id,
+      p_document_type: invoiceForm.document_type,
+      p_customer_doc_type: invoiceForm.customer_doc_type,
+      p_customer_doc_number: invoiceForm.customer_doc_number || null,
+      p_customer_name: invoiceForm.customer_name || null,
+      p_idempotency_key: idempotencyKey,
+    };
+
+    const { data, error } = await supabase.rpc("rpc_queue_invoice_issue", payload);
+    if (error) throw new Error(error.message || "QUEUE_FAILED");
+
+    setSelectedOrder((prev) => ({ ...prev, ...data }));
+    return { idempotencyKey, row: data };
+  };
+
+  const enqueueInvoice = async () => {
+    if (!selectedOrder?.id) return;
+    setQueueBusy(true);
+    setInvoiceFeedback({ type: "", text: "" });
+
+    try {
+      await runQueueInvoice();
+      setInvoiceFeedback({ type: "success", text: "Comprobante encolado. Ahora puedes emitirlo." });
+      await fetchOrderAndItems();
+    } catch (error) {
+      setInvoiceFeedback({ type: "error", text: getIssueErrorMessage(400, error.message) });
+    } finally {
+      setQueueBusy(false);
+    }
+  };
+
+  const emitInvoice = async ({ forceRetry = false } = {}) => {
+    if (!selectedOrder?.id) return;
+
+    setInvoiceBusy(true);
+    setInvoiceFeedback({ type: "", text: "" });
+
+    try {
+      const queued = await runQueueInvoice();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+
+      if (!accessToken) {
+        setInvoiceFeedback({ type: "error", text: "No hay sesión activa del admin. Vuelve a iniciar sesión." });
+        setInvoiceBusy(false);
+        return;
+      }
+
+      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/issue-invoice`;
+      const response = await fetch(functionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          order_id: selectedOrder.id,
+          document_type: invoiceForm.document_type,
+          customer_doc_type: invoiceForm.customer_doc_type,
+          customer_doc_number: invoiceForm.customer_doc_number,
+          customer_name: invoiceForm.customer_name,
+          idempotency_key: queued?.idempotencyKey,
+          force_retry: Boolean(forceRetry),
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        const errorText = payload?.error || payload?.detail || payload?.message || "EMIT_FAILED";
+        setInvoiceFeedback({ type: "error", text: getIssueErrorMessage(response.status, errorText) });
+        setInvoiceBusy(false);
+        return;
+      }
+
+      setInvoiceFeedback({
+        type: getInvoiceStatusTone(payload.status),
+        text: `Comprobante ${String(payload.status || "emitido").toUpperCase()}: ${payload.full_number || buildFullNumber(payload.series, payload.correlativo)}`,
+      });
+
+      setSelectedOrder((prev) => ({
+        ...prev,
+        sunat_status: payload.status || prev.sunat_status,
+        series: payload.series || prev.series,
+        correlativo: payload.correlativo || prev.correlativo,
+        hash: payload.hash || prev.hash,
+        qr_text: payload.qr_text || prev.qr_text,
+        ticket_html: payload.ticket_html || prev.ticket_html,
+        ticket_pdf_base64: payload.ticket_pdf_base64 || prev.ticket_pdf_base64,
+      }));
+
+      await fetchOrderAndItems();
+    } catch (error) {
+      setInvoiceFeedback({ type: "error", text: getIssueErrorMessage(500, error.message) });
+    } finally {
+      setInvoiceBusy(false);
+    }
+  };
+
+  const downloadTicketPdf = () => {
+    const b64 = String(selectedOrder?.ticket_pdf_base64 || "");
+    if (!b64) {
+      setInvoiceFeedback({ type: "error", text: "No hay PDF generado para este comprobante." });
+      return;
+    }
+
+    try {
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const fullNumber = buildFullNumber(selectedOrder.series, selectedOrder.correlativo).replace(/\s+/g, "_");
+      anchor.href = url;
+      anchor.download = `${invoiceDocTypeLabel(selectedOrder.document_type).toLowerCase()}_${fullNumber || selectedOrder.id}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setInvoiceFeedback({ type: "error", text: "No se pudo descargar el PDF. Verifica la data del comprobante." });
+    }
+  };
+
   if (loading) return <p>Cargando detalle...</p>;
   if (!selectedOrder) return <p>Sin pedidos para mostrar.</p>;
 
   const availableStatusChanges = getAllowedStatusChanges(selectedOrder);
   const canCancel = availableStatusChanges.includes("cancelled");
+  const fullNumber = buildFullNumber(selectedOrder.series, selectedOrder.correlativo);
 
   return (
     <div className="order-detail-sedap-page">
@@ -380,6 +572,74 @@ export default function OrderDetail() {
             </div>
           </article>
 
+          <article className="invoice-card">
+            <h5>Comprobante (MVP simulado)</h5>
+            <div className="invoice-form-grid">
+              <label>
+                Tipo de documento
+                <select
+                  value={invoiceForm.document_type}
+                  onChange={(e) => setInvoiceForm((prev) => ({
+                    ...prev,
+                    document_type: e.target.value,
+                    customer_doc_type: e.target.value === "factura" ? "RUC" : prev.customer_doc_type,
+                  }))}
+                >
+                  {DOCUMENT_TYPES.map((type) => <option key={type} value={type}>{invoiceDocTypeLabel(type)}</option>)}
+                </select>
+              </label>
+
+              <label>
+                Tipo doc. cliente
+                <select
+                  value={invoiceForm.customer_doc_type}
+                  onChange={(e) => setInvoiceForm((prev) => ({ ...prev, customer_doc_type: e.target.value }))}
+                >
+                  {CUSTOMER_DOC_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
+              </label>
+
+              <label>
+                N° documento
+                <input
+                  type="text"
+                  value={invoiceForm.customer_doc_number}
+                  onChange={(e) => setInvoiceForm((prev) => ({ ...prev, customer_doc_number: e.target.value.trim() }))}
+                  placeholder={invoiceForm.customer_doc_type === "RUC" ? "11 dígitos" : "Documento"}
+                />
+              </label>
+
+              <label>
+                Nombre / Razón social
+                <input
+                  type="text"
+                  value={invoiceForm.customer_name}
+                  onChange={(e) => setInvoiceForm((prev) => ({ ...prev, customer_name: e.target.value }))}
+                  placeholder="Nombre del cliente"
+                />
+              </label>
+            </div>
+
+            <div className="invoice-actions">
+              <button type="button" className="btn-soft" onClick={enqueueInvoice} disabled={queueBusy || invoiceBusy}>Encolar</button>
+              <button type="button" onClick={() => emitInvoice({ forceRetry: false })} disabled={invoiceBusy || queueBusy}>Emitir</button>
+              <button type="button" className="btn-soft" onClick={() => emitInvoice({ forceRetry: true })} disabled={invoiceBusy || queueBusy}>Reintentar</button>
+              <button type="button" className="btn-soft" onClick={() => setTicketModalOpen(true)} disabled={!selectedOrder.ticket_html}>Ver ticket</button>
+              <button type="button" className="btn-soft" onClick={downloadTicketPdf} disabled={!selectedOrder.ticket_pdf_base64}>Descargar PDF</button>
+            </div>
+
+            {invoiceFeedback.text ? <p className={`invoice-feedback ${invoiceFeedback.type}`}>{invoiceFeedback.text}</p> : null}
+
+            <div className="invoice-result-grid">
+              <div><span>Estado</span><strong>{selectedOrder.sunat_status || "not_requested"}</strong></div>
+              <div><span>Serie</span><strong>{selectedOrder.series || "-"}</strong></div>
+              <div><span>Correlativo</span><strong>{selectedOrder.correlativo || "-"}</strong></div>
+              <div><span>Número</span><strong>{fullNumber}</strong></div>
+              <div><span>Hash</span><strong>{selectedOrder.hash || "-"}</strong></div>
+              <div className="full"><span>QR text</span><strong>{selectedOrder.qr_text || "-"}</strong></div>
+            </div>
+          </article>
+
           <article className="track-card">
             <div className="track-map-placeholder">
               <div className="track-title">Rastreo del pedido</div>
@@ -409,6 +669,18 @@ export default function OrderDetail() {
           </article>
         </section>
       </div>
+
+      {ticketModalOpen ? (
+        <div className="ticket-modal-backdrop" role="dialog" aria-modal="true">
+          <div className="ticket-modal-card">
+            <div className="ticket-modal-head">
+              <h4>Ticket generado (simulado)</h4>
+              <button type="button" onClick={() => setTicketModalOpen(false)}>Cerrar</button>
+            </div>
+            <div className="ticket-modal-body" dangerouslySetInnerHTML={{ __html: String(selectedOrder.ticket_html || "<p>Sin ticket disponible.</p>") }} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
