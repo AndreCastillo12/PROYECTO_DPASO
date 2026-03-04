@@ -13,7 +13,7 @@ function errMsg(error, fallback) {
 }
 
 function explainHttpError(status, payloadError) {
-  if (status === 401) return "Tu sesión expiró. Inicia sesión nuevamente.";
+  if (status === 401) return "Sesión no válida, vuelva a iniciar sesión";
   if (status === 403) return "No tienes permisos de admin/superadmin para esta acción.";
   if (payloadError === "FORBIDDEN_SUPERADMIN_TARGET") return "Solo un superadmin puede gestionar otro superadmin.";
   return "";
@@ -84,11 +84,10 @@ export default function Usuarios() {
     setBusy(true);
     try {
       await invokeEdge("create_internal_user", {
-      email: normalizedEmail,
-      password,
-      role: newRole,
-    });
-
+        email: normalizedEmail,
+        password,
+        role: newRole,
+      });
     } catch (error) {
       const edgeError = error instanceof EdgeFunctionError ? error : null;
       const reason = explainHttpError(edgeError?.status, edgeError?.code);
@@ -136,11 +135,10 @@ export default function Usuarios() {
     setBusy(true);
     try {
       await invokeEdge("manage_internal_user", {
-      action: "reset_password",
-      user_id: userId,
-      new_password: nextPassword,
-    });
-
+        action: "reset_password",
+        user_id: userId,
+        new_password: nextPassword,
+      });
     } catch (error) {
       const edgeError = error instanceof EdgeFunctionError ? error : null;
       showToast(explainHttpError(edgeError?.status, edgeError?.code) || `No se pudo restablecer contraseña: ${edgeError?.code || error?.message || "ERROR"}`, "error");
@@ -158,10 +156,9 @@ export default function Usuarios() {
     setBusy(true);
     try {
       await invokeEdge("manage_internal_user", {
-      action: enabled ? "enable_user" : "disable_user",
-      user_id: userId,
-    });
-
+        action: enabled ? "enable_user" : "disable_user",
+        user_id: userId,
+      });
     } catch (error) {
       const edgeError = error instanceof EdgeFunctionError ? error : null;
       showToast(explainHttpError(edgeError?.status, edgeError?.code) || `No se pudo actualizar estado: ${edgeError?.code || error?.message || "ERROR"}`, "error");
@@ -184,10 +181,9 @@ export default function Usuarios() {
     setBusy(true);
     try {
       await invokeEdge("manage_internal_user", {
-      action: "delete_user",
-      user_id: userId,
-    });
-
+        action: "delete_user",
+        user_id: userId,
+      });
     } catch (error) {
       const edgeError = error instanceof EdgeFunctionError ? error : null;
       const reason = explainHttpError(edgeError?.status, edgeError?.code) || `No se pudo eliminar cuenta: ${edgeError?.code || error?.message || "ERROR"}`;
