@@ -43,7 +43,7 @@ Configura en el proyecto:
 
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `DPASO_SERVICE_ROLE_KEY`
 
 Si falta deploy o hay variables mal configuradas, en UI verás errores de conexión a Edge Function.
 
@@ -54,6 +54,24 @@ Asegúrate de tener en `.env` del panel admin:
 - `VITE_SUPABASE_ANON_KEY`
 
 Sin eso, el panel no podrá invocar RPCs/functions.
+
+
+### 4.1) Reiniciar dev server al cambiar `.env`
+Si cambias `VITE_SUPABASE_URL` o `VITE_SUPABASE_ANON_KEY`, debes reiniciar `npm run dev`.
+Vite no siempre recarga variables ya inyectadas en caliente para llamadas a Edge Functions.
+
+### 4.2) Prueba rápida Edge Functions (local y producción)
+1. Inicia sesión en el panel admin con una cuenta `admin/superadmin`.
+2. Abre DevTools -> Network y ejecuta una acción en **Usuarios internos** (crear/reset/disable/delete).
+3. Verifica que el request `POST /functions/v1/<function_name>` salga con headers:
+   - `Authorization: Bearer <access_token>`
+   - `apikey: <VITE_SUPABASE_ANON_KEY>`
+   - `Content-Type: application/json`
+4. Verifica `OPTIONS` = 200 y luego `POST` sin 401.
+
+Entornos esperados:
+- Local: `http://localhost:5173`
+- Producción: `https://admin.dpasococinalibre.com`
 
 ### 5) Nota sobre `email rate limit exceeded`
 Si ves `email rate limit exceeded`, Supabase está limitando altas consecutivas del mismo origen.

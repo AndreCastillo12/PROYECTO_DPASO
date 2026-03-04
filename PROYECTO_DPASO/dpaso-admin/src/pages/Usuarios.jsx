@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FunctionsHttpError } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabaseClient";
+import { EdgeFunctionError, invokeEdge } from "../lib/edgeFunctions";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import useAdminRole from "../hooks/useAdminRole";
@@ -17,40 +17,6 @@ function explainHttpError(status, payloadError) {
   if (status === 403) return "No tienes permisos de admin/superadmin para esta acción.";
   if (payloadError === "FORBIDDEN_SUPERADMIN_TARGET") return "Solo un superadmin puede gestionar otro superadmin.";
   return "";
-}
-
-async function invokeEdge(functionName, body) {
-  const { data: sessionData } = await supabase.auth.getSession();
-  const accessToken = sessionData?.session?.access_token;
-  if (!accessToken) {
-    return { ok: false, status: 401, error: "SESSION_REQUIRED" };
-  }
-
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  const endpoint = `${url}/functions/v1/${functionName}`;
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: anonKey,
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload?.ok === false) {
-    return {
-      ok: false,
-      status: response.status,
-      error: payload?.error || "FUNCTION_CALL_FAILED",
-      detail: payload?.detail || null,
-    };
-  }
-
-  return { ok: true, data: payload };
 }
 
 export default function Usuarios() {
@@ -116,15 +82,17 @@ export default function Usuarios() {
     if (!password || password.length < 6) return showToast("La contraseña debe tener al menos 6 caracteres", "warning");
 
     setBusy(true);
-    const result = await invokeEdge("create_internal_user", {
+    try {
+      await invokeEdge("create_internal_user", {
       email: normalizedEmail,
       password,
       role: newRole,
     });
 
-    if (!result.ok) {
-      const reason = explainHttpError(result.status, result.error);
-      showToast(reason || `No se pudo crear usuario: ${result.error}`, "error");
+    } catch (error) {
+      const edgeError = error instanceof EdgeFunctionError ? error : null;
+      const reason = explainHttpError(edgeError?.status, edgeError?.code);
+      showToast(reason || `No se pudo crear usuario: ${edgeError?.code || error?.message || "ERROR"}`, "error");
       setBusy(false);
       return;
     }
@@ -166,14 +134,16 @@ export default function Usuarios() {
     if (!nextPassword || nextPassword.length < 6) return;
 
     setBusy(true);
-    const result = await invokeEdge("manage_internal_user", {
+    try {
+      await invokeEdge("manage_internal_user", {
       action: "reset_password",
       user_id: userId,
       new_password: nextPassword,
     });
 
-    if (!result.ok) {
-      showToast(explainHttpError(result.status, result.error) || `No se pudo restablecer contraseña: ${result.error}`, "error");
+    } catch (error) {
+      const edgeError = error instanceof EdgeFunctionError ? error : null;
+      showToast(explainHttpError(edgeError?.status, edgeError?.code) || `No se pudo restablecer contraseña: ${edgeError?.code || error?.message || "ERROR"}`, "error");
       setBusy(false);
       return;
     }
@@ -186,13 +156,15 @@ export default function Usuarios() {
     if (!window.confirm(`${enabled ? "Habilitar" : "Deshabilitar"} ${userEmail}?`)) return;
 
     setBusy(true);
-    const result = await invokeEdge("manage_internal_user", {
+    try {
+      await invokeEdge("manage_internal_user", {
       action: enabled ? "enable_user" : "disable_user",
       user_id: userId,
     });
 
-    if (!result.ok) {
-      showToast(explainHttpError(result.status, result.error) || `No se pudo actualizar estado: ${result.error}`, "error");
+    } catch (error) {
+      const edgeError = error instanceof EdgeFunctionError ? error : null;
+      showToast(explainHttpError(edgeError?.status, edgeError?.code) || `No se pudo actualizar estado: ${edgeError?.code || error?.message || "ERROR"}`, "error");
       setBusy(false);
       return;
     }
@@ -210,13 +182,15 @@ export default function Usuarios() {
     if (!window.confirm(`Eliminar cuenta completa ${userEmail}? Esta acción no se puede deshacer.`)) return;
 
     setBusy(true);
-    const result = await invokeEdge("manage_internal_user", {
+    try {
+      await invokeEdge("manage_internal_user", {
       action: "delete_user",
       user_id: userId,
     });
 
-    if (!result.ok) {
-      const reason = explainHttpError(result.status, result.error) || `No se pudo eliminar cuenta: ${result.error}`;
+    } catch (error) {
+      const edgeError = error instanceof EdgeFunctionError ? error : null;
+      const reason = explainHttpError(edgeError?.status, edgeError?.code) || `No se pudo eliminar cuenta: ${edgeError?.code || error?.message || "ERROR"}`;
       showToast(reason, "error");
       setBusy(false);
       return;
