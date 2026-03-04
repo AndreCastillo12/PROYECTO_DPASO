@@ -100,7 +100,7 @@ function getIssueErrorMessage(status, errorCodeOrDetail) {
   const text = String(errorCodeOrDetail || "");
   const upper = text.toUpperCase();
 
-  if (status === 401 || upper.includes("UNAUTHORIZED")) return "Sesión expirada. Vuelve a iniciar sesión en el panel.";
+  if (status === 401 || upper.includes("UNAUTHORIZED")) return "Sesión no válida, vuelve a iniciar sesión.";
   if (status === 403 || upper.includes("FORBIDDEN")) return "No tienes permisos para emitir comprobantes.";
   if (status === 400 || upper.includes("ORDER_ID_REQUIRED")) return "Faltan datos obligatorios para emitir el comprobante.";
   if (upper.includes("FACTURA_REQUIRES_VALID_RUC")) return "Para factura debes ingresar RUC válido (11 dígitos).";
@@ -160,6 +160,8 @@ export default function OrderDetail() {
   const [queueBusy, setQueueBusy] = useState(false);
   const [invoiceFeedback, setInvoiceFeedback] = useState({ type: "", text: "" });
   const [ticketModalOpen, setTicketModalOpen] = useState(false);
+  const [adminRole, setAdminRole] = useState("");
+  const [adminRoleLoading, setAdminRoleLoading] = useState(true);
 
   const fetchOrderAndItems = useCallback(async () => {
     setLoading(true);
@@ -200,6 +202,43 @@ export default function OrderDetail() {
     if (!selectedOrder) return;
     setInvoiceForm(mapOrderToInvoiceForm(selectedOrder));
   }, [selectedOrder]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadAdminRole() {
+      setAdminRoleLoading(true);
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (!alive) return;
+
+      if (authError || !authData?.user?.id) {
+        setAdminRole("");
+        setAdminRoleLoading(false);
+        return;
+      }
+
+      const { data: roleRow, error: roleError } = await supabase
+        .from("admin_panel_user_roles")
+        .select("role")
+        .eq("user_id", authData.user.id)
+        .maybeSingle();
+
+      if (!alive) return;
+      if (roleError) {
+        const { data: rpcRole } = await supabase.rpc("get_admin_panel_role");
+        if (!alive) return;
+        setAdminRole(String(rpcRole || "").toLowerCase());
+      } else {
+        setAdminRole(String(roleRow?.role || "").toLowerCase());
+      }
+      setAdminRoleLoading(false);
+    }
+
+    loadAdminRole();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const subtotal = useMemo(() => orderItems.reduce((acc, item) => acc + Number(item.subtotal || 0), 0), [orderItems]);
 
@@ -355,66 +394,90 @@ export default function OrderDetail() {
   const emitInvoice = async ({ forceRetry = false } = {}) => {
     if (!selectedOrder?.id) return;
 
+    if (!["admin", "superadmin"].includes(adminRole)) {
+      setInvoiceFeedback({ type: "error", text: "No tienes permisos admin para emitir comprobantes." });
+      return;
+    }
+
     setInvoiceBusy(true);
     setInvoiceFeedback({ type: "", text: "" });
 
     try {
       const queued = await runQueueInvoice();
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      const { data: { session } } = await supabase.auth.getSession();
 
-      if (!accessToken) {
-        setInvoiceFeedback({ type: "error", text: "No hay sesión activa del admin. Vuelve a iniciar sesión." });
-        setInvoiceBusy(false);
+      if (import.meta.env.DEV) {
+        console.debug("[invoice-debug] session exists:", Boolean(session));
+        console.debug("[invoice-debug] token length:", Number(session?.access_token?.length || 0));
+      }
+
+      if (!session?.access_token) {
+        setInvoiceFeedback({ type: "error", text: "Sesión no válida, vuelve a iniciar sesión." });
         return;
       }
 
-      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/issue-invoice`;
-      const response = await fetch(functionUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({
-          order_id: selectedOrder.id,
-          document_type: invoiceForm.document_type,
-          customer_doc_type: invoiceForm.customer_doc_type,
-          customer_doc_number: invoiceForm.customer_doc_number,
-          customer_name: invoiceForm.customer_name,
-          idempotency_key: queued?.idempotencyKey,
-          force_retry: Boolean(forceRetry),
-        }),
+      const payloadBody = {
+        order_id: selectedOrder.id,
+        document_type: invoiceForm.document_type,
+        customer_doc_type: invoiceForm.customer_doc_type,
+        customer_doc_number: invoiceForm.customer_doc_number,
+        customer_name: invoiceForm.customer_name,
+        idempotency_key: queued?.idempotencyKey,
+        force_retry: Boolean(forceRetry),
+      };
+
+      const { data: payload, error: invokeError } = await supabase.functions.invoke("issue-invoice", {
+        body: payloadBody,
       });
 
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.ok === false) {
+      if (import.meta.env.DEV) {
+        console.debug("[invoice-debug] function invoke ok:", !invokeError);
+      }
+
+      if (invokeError) {
+        const status = Number(invokeError?.context?.status || 500);
+        const responseData = invokeError?.context ? await invokeError.context.json().catch(() => ({})) : {};
+        const errorText = responseData?.error || responseData?.detail || invokeError.message || "EMIT_FAILED";
+
+        if (status === 401) {
+          setInvoiceFeedback({ type: "error", text: "Sesión no válida, vuelve a iniciar sesión." });
+        } else if (status === 403) {
+          setInvoiceFeedback({ type: "error", text: "No tienes permisos admin." });
+        } else if (status === 400) {
+          setInvoiceFeedback({ type: "error", text: getIssueErrorMessage(status, errorText) });
+        } else {
+            console.error("[issue-invoice] error interno invoke", { status, errorText, responseData });
+          setInvoiceFeedback({ type: "error", text: "Error interno al emitir." });
+        }
+        return;
+      }
+
+      if (payload?.ok === false) {
         const errorText = payload?.error || payload?.detail || payload?.message || "EMIT_FAILED";
-        setInvoiceFeedback({ type: "error", text: getIssueErrorMessage(response.status, errorText) });
-        setInvoiceBusy(false);
+        setInvoiceFeedback({ type: "error", text: getIssueErrorMessage(400, errorText) });
         return;
       }
 
       setInvoiceFeedback({
-        type: getInvoiceStatusTone(payload.status),
-        text: `Comprobante ${String(payload.status || "emitido").toUpperCase()}: ${payload.full_number || buildFullNumber(payload.series, payload.correlativo)}`,
+        type: getInvoiceStatusTone(payload?.status),
+        text: `Comprobante ${String(payload?.status || "emitido").toUpperCase()}: ${payload?.full_number || buildFullNumber(payload?.series, payload?.correlativo)}`,
       });
 
       setSelectedOrder((prev) => ({
         ...prev,
-        sunat_status: payload.status || prev.sunat_status,
-        series: payload.series || prev.series,
-        correlativo: payload.correlativo || prev.correlativo,
-        hash: payload.hash || prev.hash,
-        qr_text: payload.qr_text || prev.qr_text,
-        ticket_html: payload.ticket_html || prev.ticket_html,
-        ticket_pdf_base64: payload.ticket_pdf_base64 || prev.ticket_pdf_base64,
+        sunat_status: payload?.status || prev.sunat_status,
+        series: payload?.series || prev.series,
+        correlativo: payload?.correlativo || prev.correlativo,
+        hash: payload?.hash || prev.hash,
+        qr_text: payload?.qr_text || prev.qr_text,
+        ticket_html: payload?.ticket_html || prev.ticket_html,
+        ticket_pdf_base64: payload?.ticket_pdf_base64 || prev.ticket_pdf_base64,
       }));
 
       await fetchOrderAndItems();
     } catch (error) {
-      setInvoiceFeedback({ type: "error", text: getIssueErrorMessage(500, error.message) });
+      console.error("[issue-invoice] unexpected error", error);
+      setInvoiceFeedback({ type: "error", text: "Error interno al emitir." });
     } finally {
       setInvoiceBusy(false);
     }
@@ -453,6 +516,8 @@ export default function OrderDetail() {
   const availableStatusChanges = getAllowedStatusChanges(selectedOrder);
   const canCancel = availableStatusChanges.includes("cancelled");
   const fullNumber = buildFullNumber(selectedOrder.series, selectedOrder.correlativo);
+  const canEmitInvoice = ["admin", "superadmin"].includes(adminRole);
+  const emitDisabledReason = adminRoleLoading ? "Validando permisos..." : "Solo admin/superadmin puede emitir";
 
   return (
     <div className="order-detail-sedap-page">
@@ -622,8 +687,23 @@ export default function OrderDetail() {
 
             <div className="invoice-actions">
               <button type="button" className="btn-soft" onClick={enqueueInvoice} disabled={queueBusy || invoiceBusy}>Encolar</button>
-              <button type="button" onClick={() => emitInvoice({ forceRetry: false })} disabled={invoiceBusy || queueBusy}>Emitir</button>
-              <button type="button" className="btn-soft" onClick={() => emitInvoice({ forceRetry: true })} disabled={invoiceBusy || queueBusy}>Reintentar</button>
+              <button
+                type="button"
+                onClick={() => emitInvoice({ forceRetry: false })}
+                disabled={invoiceBusy || queueBusy || !canEmitInvoice}
+                title={canEmitInvoice ? "Emitir comprobante" : emitDisabledReason}
+              >
+                Emitir
+              </button>
+              <button
+                type="button"
+                className="btn-soft"
+                onClick={() => emitInvoice({ forceRetry: true })}
+                disabled={invoiceBusy || queueBusy || !canEmitInvoice}
+                title={canEmitInvoice ? "Reintentar emisión" : emitDisabledReason}
+              >
+                Reintentar
+              </button>
               <button type="button" className="btn-soft" onClick={() => setTicketModalOpen(true)} disabled={!selectedOrder.ticket_html}>Ver ticket</button>
               <button type="button" className="btn-soft" onClick={downloadTicketPdf} disabled={!selectedOrder.ticket_pdf_base64}>Descargar PDF</button>
             </div>

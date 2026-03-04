@@ -337,7 +337,7 @@ async function callInvoiceProviderStub(params: {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { status: 200, headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse(405, { ok: false, error: "METHOD_NOT_ALLOWED" });
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -363,18 +363,36 @@ Deno.serve(async (req) => {
 
   try {
     const internalSecret = String(req.headers.get("x-internal-secret") || "").trim();
-    if (INTERNAL_WEBHOOK_SECRET && internalSecret && internalSecret === INTERNAL_WEBHOOK_SECRET) {
+    const authHeader = req.headers.get("Authorization") || "";
+    const apikeyHeader = req.headers.get("apikey") || "";
+    const internalSecretUsed = Boolean(INTERNAL_WEBHOOK_SECRET && internalSecret && internalSecret === INTERNAL_WEBHOOK_SECRET);
+
+    if (internalSecretUsed) {
       callerType = "system";
     } else {
-      const authHeader = req.headers.get("Authorization") || "";
-      if (!authHeader) return jsonResponse(401, { ok: false, error: "UNAUTHORIZED" });
+      if (!authHeader) {
+        console.warn("[issue-invoice] unauthorized: missing auth header", {
+          has_authorization_header: false,
+          has_apikey_header: Boolean(apikeyHeader),
+          used_internal_webhook_secret: false,
+        });
+        return jsonResponse(401, { ok: false, error: "UNAUTHORIZED" });
+      }
 
       const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         global: { headers: { Authorization: authHeader } },
         auth: { persistSession: false, autoRefreshToken: false },
       });
       const { data: userData, error: userError } = await userClient.auth.getUser();
-      if (userError || !userData?.user?.id) return jsonResponse(401, { ok: false, error: "UNAUTHORIZED" });
+      if (userError || !userData?.user?.id) {
+        console.warn("[issue-invoice] unauthorized: auth.getUser failed", {
+          has_authorization_header: Boolean(authHeader),
+          has_apikey_header: Boolean(apikeyHeader),
+          used_internal_webhook_secret: false,
+          auth_error: userError?.message || null,
+        });
+        return jsonResponse(401, { ok: false, error: "UNAUTHORIZED" });
+      }
 
       const { data: roleRow, error: roleError } = await adminClient
         .from("admin_panel_user_roles")
@@ -600,7 +618,7 @@ Deno.serve(async (req) => {
       full_number: fullNumber,
       hash: providerResult.hash,
       qr_text: qrText,
-      ticket_html,
+      ticket_html: ticketHtml,
       ticket_pdf_base64: ticketPdfBase64,
     });
   } catch (error) {

@@ -206,6 +206,9 @@ Provider simulado (defaults recomendados):
 - `INVOICE_PROVIDER_TOKEN=` (vacío para modo stub)
 
 > En MVP simulado, `stub + sandbox` genera serie/correlativo/hash/qr/ticket sin SUNAT real.
+>
+> Checklist mínimo de secrets (stub/sandbox):
+> `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `INTERNAL_WEBHOOK_SECRET`, `INVOICE_PROVIDER_NAME=stub`, `INVOICE_PROVIDER_MODE=sandbox`.
 
 ### 4) Variables frontend admin
 
@@ -214,6 +217,9 @@ En Vercel (proyecto admin):
 - `VITE_SUPABASE_ANON_KEY`
 
 ### 5) Prueba manual en PANEL ADMIN (Order Detail)
+
+> Para emitir desde local debes estar logueado con usuario admin/superadmin en el panel.
+> El módulo usa `supabase.functions.invoke("issue-invoice")` (no fetch manual) para enviar Authorization + apikey automáticamente.
 
 1. Abrir detalle de pedido.
 2. Completar módulo **Comprobante**:
