@@ -15,7 +15,7 @@ function buildCorsHeaders(req: Request) {
 
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-secret",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     Vary: "Origin",
   };
@@ -42,9 +42,13 @@ Deno.serve(async (req) => {
   }
 
   try {
+    if (!Deno.env.get("DPASO_SERVICE_ROLE_KEY")) {
+      throw new Error("Missing DPASO_SERVICE_ROLE_KEY secret");
+    }
+
     const url = Deno.env.get("SUPABASE_URL") || "";
     const anon = Deno.env.get("SUPABASE_ANON_KEY") || "";
-    const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const service = Deno.env.get("DPASO_SERVICE_ROLE_KEY") || "";
 
     if (!url || !anon || !service) {
       return jsonResponse(req, 500, { ok: false, error: "MISSING_SUPABASE_ENV" });

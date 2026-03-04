@@ -12,7 +12,7 @@ function buildCorsHeaders(req: Request) {
 
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-internal-secret",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     Vary: "Origin",
   };
@@ -30,12 +30,26 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return jsonResponse(req, 405, { ok: false, error: "METHOD_NOT_ALLOWED" });
 
   try {
+    if (!Deno.env.get("DPASO_SERVICE_ROLE_KEY")) {
+      throw new Error("Missing DPASO_SERVICE_ROLE_KEY secret");
+    }
+
     const url = Deno.env.get("SUPABASE_URL") || "";
     const anon = Deno.env.get("SUPABASE_ANON_KEY") || "";
-    const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const service = Deno.env.get("DPASO_SERVICE_ROLE_KEY") || "";
 
-    if (!url || !anon || !service) {
-      return jsonResponse(req, 500, { ok: false, error: "MISSING_SUPABASE_ENV" });
+    const missing = [
+      !url ? "SUPABASE_URL" : "",
+      !anon ? "SUPABASE_ANON_KEY" : "",
+      !service ? "DPASO_SERVICE_ROLE_KEY" : "",
+    ].filter(Boolean);
+
+    if (missing.length > 0) {
+      return jsonResponse(req, 500, {
+        ok: false,
+        error: "MISSING_SUPABASE_ENV",
+        detail: `Missing required env vars: ${missing.join(", ")}`,
+      });
     }
 
     const authHeader = req.headers.get("Authorization") || "";
@@ -53,7 +67,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     const callerRole = String(callerRoleRow?.role || "").trim().toLowerCase();
-    if (callerRole !== "admin") return jsonResponse(req, 403, { ok: false, error: "FORBIDDEN" });
+    if (!["admin", "superadmin"].includes(callerRole)) return jsonResponse(req, 403, { ok: false, error: "FORBIDDEN" });
 
     const body = await req.json();
     const email = String(body?.email || "").trim().toLowerCase();
