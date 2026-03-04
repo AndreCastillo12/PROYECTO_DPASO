@@ -119,8 +119,12 @@ Deno.serve(async (req) => {
   }
 
   try {
+    if (!Deno.env.get('DPASO_SERVICE_ROLE_KEY')) {
+      throw new Error('Missing DPASO_SERVICE_ROLE_KEY secret');
+    }
+
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const DPASO_SERVICE_ROLE_KEY = Deno.env.get('DPASO_SERVICE_ROLE_KEY') ?? '';
     const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
     const ORDERS_NOTIFY_EMAIL = String(Deno.env.get('ORDERS_NOTIFY_EMAIL') ?? '').trim().toLowerCase();
     const INTERNAL_WEBHOOK_SECRET = String(Deno.env.get('INTERNAL_WEBHOOK_SECRET') ?? '').trim();
@@ -138,7 +142,7 @@ Deno.serve(async (req) => {
       has_record_id: Boolean(payload?.record?.id),
       secrets_present: {
         has_supabase_url: Boolean(SUPABASE_URL),
-        has_service_role: Boolean(SUPABASE_SERVICE_ROLE_KEY),
+        has_service_role: Boolean(DPASO_SERVICE_ROLE_KEY),
         has_resend_key: Boolean(RESEND_API_KEY),
         has_notify_email: Boolean(ORDERS_NOTIFY_EMAIL),
         has_internal_secret: Boolean(INTERNAL_WEBHOOK_SECRET),
@@ -146,7 +150,7 @@ Deno.serve(async (req) => {
       }
     });
 
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    if (!SUPABASE_URL || !DPASO_SERVICE_ROLE_KEY) {
       throw new Error('SUPABASE_ENV_MISSING');
     }
 
@@ -165,7 +169,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    const supabase = createClient(SUPABASE_URL, DPASO_SERVICE_ROLE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false }
     });
 

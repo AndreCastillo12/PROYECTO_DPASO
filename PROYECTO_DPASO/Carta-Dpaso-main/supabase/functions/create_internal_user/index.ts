@@ -42,14 +42,18 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return jsonResponse(req, 405, { ok: false, error: "METHOD_NOT_ALLOWED" });
 
   try {
+    if (!Deno.env.get("DPASO_SERVICE_ROLE_KEY")) {
+      throw new Error("Missing DPASO_SERVICE_ROLE_KEY secret");
+    }
+
     const url = Deno.env.get("SUPABASE_URL") || "";
     const anon = Deno.env.get("SUPABASE_ANON_KEY") || "";
-    const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const service = Deno.env.get("DPASO_SERVICE_ROLE_KEY") || "";
 
     const missing = [
       !url ? "SUPABASE_URL" : "",
       !anon ? "SUPABASE_ANON_KEY" : "",
-      !service ? "SUPABASE_SERVICE_ROLE_KEY" : "",
+      !service ? "DPASO_SERVICE_ROLE_KEY" : "",
     ].filter(Boolean);
     if (missing.length > 0) return missingEnv(req, missing);
 
