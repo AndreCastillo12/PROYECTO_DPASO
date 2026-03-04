@@ -171,3 +171,165 @@
   .items-head,
   .item-row { grid-template-columns: 1fr 56px 80px 82px; font-size: 11px; }
 }
+
+.invoice-card {
+  border: 1px solid #e8edf5;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+.invoice-card h5 { margin: 0 0 10px; font-size: 14px; color: #35405a; }
+
+.invoice-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.invoice-form-grid label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: #6f7a92;
+}
+
+.invoice-form-grid input,
+.invoice-form-grid select {
+  border: 1px solid #dfe4ef;
+  border-radius: 9px;
+  padding: 8px;
+  font-size: 12px;
+}
+
+.invoice-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.invoice-actions button {
+  border: 0;
+  border-radius: 9px;
+  padding: 7px 11px;
+  background: #2ab079;
+  color: #fff;
+  font-size: 12px;
+}
+
+.invoice-actions .btn-soft {
+  background: #eef3ff;
+  color: #41527c;
+  border: 1px solid #d2dcf4;
+}
+
+.invoice-actions button:disabled { opacity: .65; cursor: not-allowed; }
+
+.invoice-feedback {
+  margin: 10px 0 0;
+  font-size: 12px;
+  border-radius: 8px;
+  padding: 8px 9px;
+}
+
+.invoice-feedback.success {
+  background: #ebfbf4;
+  color: #127447;
+  border: 1px solid #c0ebd5;
+}
+
+.invoice-feedback.error {
+  background: #fff2f2;
+  color: #b02a37;
+  border: 1px solid #f2c8cc;
+}
+
+.invoice-feedback.info {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #d7e6ff;
+}
+
+.invoice-result-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.invoice-result-grid > div {
+  border: 1px solid #e8edf5;
+  border-radius: 8px;
+  padding: 7px 9px;
+  display: grid;
+  gap: 4px;
+}
+
+.invoice-result-grid span {
+  font-size: 11px;
+  color: #8190ad;
+}
+
+.invoice-result-grid strong {
+  font-size: 12px;
+  color: #2f3a50;
+  overflow-wrap: anywhere;
+}
+
+.invoice-result-grid .full {
+  grid-column: 1 / -1;
+}
+
+.ticket-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 1100;
+  padding: 16px;
+}
+
+.ticket-modal-card {
+  width: min(920px, 100%);
+  max-height: 88vh;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e7ebf4;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
+.ticket-modal-head {
+  padding: 11px 12px;
+  border-bottom: 1px solid #edf1f8;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ticket-modal-head h4 { margin: 0; font-size: 14px; }
+
+.ticket-modal-head button {
+  border: 1px solid #d6def0;
+  border-radius: 8px;
+  background: #f7f9ff;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: #43527a;
+}
+
+.ticket-modal-body {
+  overflow: auto;
+  background: #fafcff;
+  padding: 14px;
+}
+
+@media (max-width: 760px) {
+  .invoice-form-grid,
+  .invoice-result-grid {
+    grid-template-columns: 1fr;
+  }
+}

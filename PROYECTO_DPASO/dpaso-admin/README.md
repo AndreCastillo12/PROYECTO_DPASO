@@ -162,3 +162,128 @@ En **Authentication -> SMTP Settings** ya debes mantener:
 - Proveedor SMTP propio (Resend)
 
 Así dejas de enviar correos con branding genérico de Supabase.
+
+## MVP Emisión SIMULADA de Comprobantes (Boleta/Factura) desde Panel Admin
+
+### 1) SQL a ejecutar (orden exacto)
+
+En **Supabase Dashboard -> SQL Editor** ejecuta:
+
+1. `PROYECTO_DPASO/Carta-Dpaso-main/supabase/sprint_caja_reportes.sql` (si aún no existe `is_admin_user`).
+2. `PROYECTO_DPASO/Carta-Dpaso-main/supabase/sprint52_sunat_einvoice_foundation.sql`.
+
+> Si tu proyecto ya tiene `is_admin_user`, puedes ejecutar directamente `sprint52`.
+
+### 2) Deploy de Edge Function `issue-invoice`
+
+Desde `PROYECTO_DPASO/Carta-Dpaso-main`:
+
+```bash
+supabase functions deploy issue-invoice
+```
+
+Si no has linkeado el proyecto:
+
+```bash
+supabase link --project-ref <TU_PROJECT_REF>
+supabase functions deploy issue-invoice
+```
+
+### 3) Secrets en Supabase (nombres exactos)
+
+Ir a **Supabase Dashboard -> Edge Functions -> Secrets** y crear:
+
+Obligatorios:
+- `SUPABASE_URL` -> lo obtienes en **Project Settings -> API -> Project URL**.
+- `SUPABASE_ANON_KEY` -> **Project Settings -> API -> anon public key**.
+- `SUPABASE_SERVICE_ROLE_KEY` -> **Project Settings -> API -> service_role key**.
+- `INTERNAL_WEBHOOK_SECRET` -> valor aleatorio fuerte (ej. generado con `openssl rand -hex 32`).
+
+Provider simulado (defaults recomendados):
+- `INVOICE_PROVIDER_NAME=stub`
+- `INVOICE_PROVIDER_MODE=sandbox`
+- `INVOICE_PROVIDER_API_URL=` (vacío para modo stub)
+- `INVOICE_PROVIDER_TOKEN=` (vacío para modo stub)
+
+> En MVP simulado, `stub + sandbox` genera serie/correlativo/hash/qr/ticket sin SUNAT real.
+>
+> Checklist mínimo de secrets (stub/sandbox):
+> `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `INTERNAL_WEBHOOK_SECRET`, `INVOICE_PROVIDER_NAME=stub`, `INVOICE_PROVIDER_MODE=sandbox`.
+
+### 4) Variables frontend admin
+
+En Vercel (proyecto admin):
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+### 5) Prueba manual en PANEL ADMIN (Order Detail)
+
+> Para emitir desde local debes estar logueado con usuario **admin** del panel.
+> El módulo usa `supabase.functions.invoke("issue-invoice")` (no fetch manual) para enviar Authorization + apikey automáticamente.
+
+1. Abrir detalle de pedido.
+2. Completar módulo **Comprobante**:
+   - Tipo documento (`boleta` / `factura`)
+   - Tipo doc cliente
+   - Número doc
+   - Nombre
+3. Click **Encolar** (opcional).
+4. Click **Emitir**.
+5. Validar campos resultado:
+   - `sunat_status`
+   - `series`
+   - `correlativo`
+   - `full_number`
+   - `hash`
+   - `qr_text`
+6. Probar **Ver ticket** (modal HTML) y **Descargar PDF**.
+7. Si falla, usar **Reintentar** (envía `force_retry=true`).
+
+Troubleshooting 401:
+- Cierra sesión y vuelve a iniciar sesión en el panel admin.
+- Verifica que `VITE_SUPABASE_URL` del frontend apunta al **mismo proyecto Supabase** donde desplegaste `issue-invoice`.
+- El flujo usa `supabase.functions.invoke("issue-invoice")` con `Authorization` + `apikey` explícitos.
+
+### 6) Prueba con curl (admin JWT)
+
+Primero obtén `access_token` de un usuario admin autenticado en el panel.
+
+```bash
+curl -i -X POST "https://<PROJECT_REF>.supabase.co/functions/v1/issue-invoice" \
+  -H "Authorization: Bearer <ADMIN_ACCESS_TOKEN>" \
+  -H "apikey: <SUPABASE_ANON_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "order_id": "<ORDER_UUID>",
+    "document_type": "boleta",
+    "customer_doc_type": "DNI",
+    "customer_doc_number": "12345678",
+    "customer_name": "CLIENTE PRUEBA",
+    "idempotency_key": "manual-test-001",
+    "force_retry": false
+  }'
+```
+
+### 7) Prueba con curl (sistema interno)
+
+```bash
+curl -i -X POST "https://<PROJECT_REF>.supabase.co/functions/v1/issue-invoice" \
+  -H "x-internal-secret: <INTERNAL_WEBHOOK_SECRET>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "order_id": "<ORDER_UUID>",
+    "document_type": "factura",
+    "customer_doc_type": "RUC",
+    "customer_doc_number": "20100070970",
+    "customer_name": "EMPRESA DEMO SAC",
+    "idempotency_key": "system-test-001",
+    "force_retry": true
+  }'
+```
+
+### 8) Errores esperados (MVP)
+
+- `401 UNAUTHORIZED`: token vencido/no enviado.
+- `403 FORBIDDEN`: usuario no admin.
+- `400 FACTURA_REQUIRES_VALID_RUC`: para factura sin RUC válido.
+- `500 CORRELATIVE_ASSIGN_FAILED`: series no configuradas en `sunat_document_series`.
