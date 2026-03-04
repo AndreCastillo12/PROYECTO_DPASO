@@ -123,6 +123,25 @@ function buildFullNumber(series, correlativo) {
   return `${series}-${String(Number(correlativo)).padStart(8, "0")}`;
 }
 
+function decodeJwtPayload(token) {
+  try {
+    const [, payloadPart] = String(token || "").split(".");
+    if (!payloadPart) return null;
+    const normalized = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const decoded = atob(padded);
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
+
+function getProjectRefFromSupabaseUrl(url) {
+  const match = String(url || "").match(/^https:\/\/([^.]+)\.supabase\.co/i);
+  return match?.[1] || "";
+}
+
+
 function mapOrderToInvoiceForm(order) {
   const documentType = DOCUMENT_TYPES.includes(String(order?.document_type || "").toLowerCase())
     ? String(order.document_type).toLowerCase()
@@ -395,7 +414,7 @@ export default function OrderDetail() {
     if (!selectedOrder?.id) return;
 
     if (!["admin", "superadmin"].includes(adminRole)) {
-      setInvoiceFeedback({ type: "error", text: "No tienes permisos admin para emitir comprobantes." });
+      setInvoiceFeedback({ type: "error", text: "No tienes permisos para emitir comprobantes." });
       return;
     }
 
@@ -422,6 +441,23 @@ export default function OrderDetail() {
         return;
       }
 
+      const jwtPayload = decodeJwtPayload(accessToken);
+      const tokenProjectRef = String(jwtPayload?.iss || "").match(/\/project\/([^/]+)$/)?.[1] || "";
+      const envProjectRef = getProjectRefFromSupabaseUrl(import.meta.env.VITE_SUPABASE_URL);
+
+      if (import.meta.env.DEV) {
+        console.debug("[invoice-debug] token project ref:", tokenProjectRef || "n/a");
+        console.debug("[invoice-debug] env project ref:", envProjectRef || "n/a");
+      }
+
+      if (tokenProjectRef && envProjectRef && tokenProjectRef !== envProjectRef) {
+        setInvoiceFeedback({
+          type: "error",
+          text: "Sesión no válida para este proyecto Supabase. Cierra sesión y vuelve a ingresar.",
+        });
+        return;
+      }
+
       const payloadBody = {
         order_id: selectedOrder.id,
         document_type: invoiceForm.document_type,
@@ -432,12 +468,9 @@ export default function OrderDetail() {
         force_retry: Boolean(forceRetry),
       };
 
+      supabase.functions.setAuth(accessToken);
       const { data: payload, error: invokeError } = await supabase.functions.invoke("issue-invoice", {
         body: payloadBody,
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
       });
 
       if (import.meta.env.DEV) {
