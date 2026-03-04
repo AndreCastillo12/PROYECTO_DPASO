@@ -218,7 +218,7 @@ En Vercel (proyecto admin):
 
 ### 5) Prueba manual en PANEL ADMIN (Order Detail)
 
-> Para emitir desde local debes estar logueado con usuario **admin** (si existe superadmin también aplica).
+> Para emitir desde local debes estar logueado con usuario **admin** del panel.
 > El módulo usa `supabase.functions.invoke("issue-invoice")` (no fetch manual) para enviar Authorization + apikey automáticamente.
 
 1. Abrir detalle de pedido.

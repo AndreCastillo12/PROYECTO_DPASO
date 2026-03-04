@@ -350,7 +350,13 @@ Deno.serve(async (req) => {
   const INVOICE_PROVIDER_API_URL = String(Deno.env.get("INVOICE_PROVIDER_API_URL") || "").trim();
   const INVOICE_PROVIDER_TOKEN = String(Deno.env.get("INVOICE_PROVIDER_TOKEN") || "").trim();
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
+  console.log("[issue-invoice] boot", {
+    has_supabase_url: Boolean(SUPABASE_URL),
+    has_service_role_key: Boolean(SUPABASE_SERVICE_ROLE_KEY),
+    has_anon_key: Boolean(SUPABASE_ANON_KEY),
+  });
+
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     return jsonResponse(500, { ok: false, error: "SUPABASE_ENV_MISSING" });
   }
 
@@ -379,8 +385,13 @@ Deno.serve(async (req) => {
         return jsonResponse(401, { ok: false, error: "UNAUTHORIZED" });
       }
 
-      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-        global: { headers: { Authorization: authHeader } },
+      const userClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+        global: {
+          headers: {
+            Authorization: authHeader,
+            ...(apikeyHeader ? { apikey: apikeyHeader } : {}),
+          },
+        },
         auth: { persistSession: false, autoRefreshToken: false },
       });
       const { data: userData, error: userError } = await userClient.auth.getUser();

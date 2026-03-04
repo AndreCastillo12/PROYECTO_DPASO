@@ -413,7 +413,7 @@ export default function OrderDetail() {
   const emitInvoice = async ({ forceRetry = false } = {}) => {
     if (!selectedOrder?.id) return;
 
-    if (!["admin", "superadmin"].includes(adminRole)) {
+    if (adminRole !== "admin") {
       setInvoiceFeedback({ type: "error", text: "No tienes permisos para emitir comprobantes." });
       return;
     }
@@ -559,8 +559,8 @@ export default function OrderDetail() {
   const availableStatusChanges = getAllowedStatusChanges(selectedOrder);
   const canCancel = availableStatusChanges.includes("cancelled");
   const fullNumber = buildFullNumber(selectedOrder.series, selectedOrder.correlativo);
-  const canEmitInvoice = ["admin", "superadmin"].includes(adminRole);
-  const emitDisabledReason = adminRoleLoading ? "Validando permisos..." : "Solo admin/superadmin puede emitir";
+  const canEmitInvoice = adminRole === "admin";
+  const emitDisabledReason = adminRoleLoading ? "Validando permisos..." : "Solo admin puede emitir";
 
   return (
     <div className="order-detail-sedap-page">
