@@ -371,36 +371,57 @@ Deno.serve(async (req) => {
     const internalSecret = String(req.headers.get("x-internal-secret") || "").trim();
     const authHeader = req.headers.get("Authorization") || "";
     const apikeyHeader = req.headers.get("apikey") || "";
+    const forwardedAuthUser = String(
+      req.headers.get("x-supabase-auth-user")
+      || req.headers.get("x-sb-auth-user")
+      || req.headers.get("x-auth-user")
+      || "",
+    ).trim();
     const internalSecretUsed = Boolean(INTERNAL_WEBHOOK_SECRET && internalSecret && internalSecret === INTERNAL_WEBHOOK_SECRET);
 
     if (internalSecretUsed) {
       callerType = "system";
     } else {
-      if (!authHeader) {
-        console.warn("[issue-invoice] unauthorized: missing auth header", {
-          has_authorization_header: false,
-          has_apikey_header: Boolean(apikeyHeader),
-          used_internal_webhook_secret: internalSecretUsed,
-        });
-        return jsonResponse(401, { ok: false, error: "UNAUTHORIZED" });
+      let callerUserId = "";
+
+      if (forwardedAuthUser) {
+        callerUserId = forwardedAuthUser;
       }
 
-      const userClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-        global: {
-          headers: {
-            Authorization: authHeader,
-            ...(apikeyHeader ? { apikey: apikeyHeader } : {}),
+      if (!callerUserId && authHeader && SUPABASE_ANON_KEY) {
+        const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+          global: {
+            headers: {
+              Authorization: authHeader,
+              ...(apikeyHeader ? { apikey: apikeyHeader } : {}),
+            },
           },
-        },
-        auth: { persistSession: false, autoRefreshToken: false },
-      });
-      const { data: userData, error: userError } = await userClient.auth.getUser();
-      if (userError || !userData?.user?.id) {
-        console.warn("[issue-invoice] unauthorized: auth.getUser failed", {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const { data: userData, error: userError } = await userClient.auth.getUser();
+
+        if (userError) {
+          console.warn("[issue-invoice] getUser warning", {
+            has_authorization_header: Boolean(authHeader),
+            has_apikey_header: Boolean(apikeyHeader),
+            has_forwarded_auth_user: Boolean(forwardedAuthUser),
+            used_internal_webhook_secret: internalSecretUsed,
+            auth_error: userError?.message || null,
+          });
+        }
+
+        if (userData?.user?.id) {
+          callerUserId = userData.user.id;
+        }
+      }
+
+      if (!callerUserId) {
+        console.warn("[issue-invoice] unauthorized: missing resolvable caller", {
           has_authorization_header: Boolean(authHeader),
           has_apikey_header: Boolean(apikeyHeader),
-          used_internal_webhook_secret: internalSecretUsed,
-          auth_error: userError?.message || null,
+          has_forwarded_auth_user: Boolean(forwardedAuthUser),
+          used_internal_webhook_secret: false,
+          has_anon_key: Boolean(SUPABASE_ANON_KEY),
         });
         return jsonResponse(401, { ok: false, error: "UNAUTHORIZED" });
       }
@@ -408,17 +429,17 @@ Deno.serve(async (req) => {
       const { data: roleRow, error: roleError } = await adminClient
         .from("admin_panel_user_roles")
         .select("role")
-        .eq("user_id", userData.user.id)
+        .eq("user_id", callerUserId)
         .maybeSingle();
       if (roleError) return jsonResponse(500, { ok: false, error: "ROLE_LOOKUP_FAILED", detail: roleError.message });
 
       const role = String(roleRow?.role || "").toLowerCase();
-      if (!role || (role !== "admin" && role !== "superadmin")) {
+      if (role !== "admin") {
         return jsonResponse(403, { ok: false, error: "FORBIDDEN" });
       }
 
       callerType = "admin";
-      callerId = userData.user.id;
+      callerId = callerUserId;
     }
 
     const body = await req.json() as IssueInvoiceInput;
