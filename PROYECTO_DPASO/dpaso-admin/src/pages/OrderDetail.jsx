@@ -404,14 +404,20 @@ export default function OrderDetail() {
 
     try {
       const queued = await runQueueInvoice();
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: sessionData } = await supabase.auth.getSession();
+      let accessToken = sessionData?.session?.access_token || "";
 
-      if (import.meta.env.DEV) {
-        console.debug("[invoice-debug] session exists:", Boolean(session));
-        console.debug("[invoice-debug] token length:", Number(session?.access_token?.length || 0));
+      if (!accessToken) {
+        const { data: refreshedData } = await supabase.auth.refreshSession();
+        accessToken = refreshedData?.session?.access_token || "";
       }
 
-      if (!session?.access_token) {
+      if (import.meta.env.DEV) {
+        console.debug("[invoice-debug] session exists:", Boolean(accessToken));
+        console.debug("[invoice-debug] token length:", Number(accessToken?.length || 0));
+      }
+
+      if (!accessToken) {
         setInvoiceFeedback({ type: "error", text: "Sesión no válida, vuelve a iniciar sesión." });
         return;
       }
@@ -428,6 +434,10 @@ export default function OrderDetail() {
 
       const { data: payload, error: invokeError } = await supabase.functions.invoke("issue-invoice", {
         body: payloadBody,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
       });
 
       if (import.meta.env.DEV) {

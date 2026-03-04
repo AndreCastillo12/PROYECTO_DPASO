@@ -239,6 +239,11 @@ En Vercel (proyecto admin):
 6. Probar **Ver ticket** (modal HTML) y **Descargar PDF**.
 7. Si falla, usar **Reintentar** (envía `force_retry=true`).
 
+Troubleshooting 401:
+- Cierra sesión y vuelve a iniciar sesión en el panel admin.
+- Verifica que `VITE_SUPABASE_URL` del frontend apunta al **mismo proyecto Supabase** donde desplegaste `issue-invoice`.
+- El flujo usa `supabase.functions.invoke("issue-invoice")` con `Authorization` + `apikey` explícitos.
+
 ### 6) Prueba con curl (admin JWT)
 
 Primero obtén `access_token` de un usuario admin autenticado en el panel.

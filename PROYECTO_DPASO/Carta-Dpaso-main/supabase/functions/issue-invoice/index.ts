@@ -374,7 +374,7 @@ Deno.serve(async (req) => {
         console.warn("[issue-invoice] unauthorized: missing auth header", {
           has_authorization_header: false,
           has_apikey_header: Boolean(apikeyHeader),
-          used_internal_webhook_secret: false,
+          used_internal_webhook_secret: internalSecretUsed,
         });
         return jsonResponse(401, { ok: false, error: "UNAUTHORIZED" });
       }
@@ -388,7 +388,7 @@ Deno.serve(async (req) => {
         console.warn("[issue-invoice] unauthorized: auth.getUser failed", {
           has_authorization_header: Boolean(authHeader),
           has_apikey_header: Boolean(apikeyHeader),
-          used_internal_webhook_secret: false,
+          used_internal_webhook_secret: internalSecretUsed,
           auth_error: userError?.message || null,
         });
         return jsonResponse(401, { ok: false, error: "UNAUTHORIZED" });
