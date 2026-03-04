@@ -1,4 +1,3 @@
-import { FunctionsHttpError } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
 
 export class EdgeFunctionError extends Error {
@@ -11,23 +10,66 @@ export class EdgeFunctionError extends Error {
   }
 }
 
-async function resolveAccessToken() {
+const IS_DEV = import.meta.env.DEV;
+
+function devLog(label, payload) {
+  if (!IS_DEV) return;
+  console.log(`[invokeEdge] ${label}`, payload);
+}
+
+async function readSessionToken() {
   const {
     data: { session },
   } = await supabase.auth.getSession();
 
-  if (session?.access_token) return session.access_token;
+  return session?.access_token || null;
+}
 
-  const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
-  if (refreshError || !refreshed?.session?.access_token) {
-    throw new EdgeFunctionError("Sesión no válida, vuelva a iniciar sesión", {
+async function ensureToken() {
+  const token = await readSessionToken();
+  if (!token) {
+    throw new EdgeFunctionError("Sesión no válida", {
       status: 401,
       code: "SESSION_INVALID",
-      detail: refreshError?.message || null,
     });
   }
+  return token;
+}
 
-  return refreshed.session.access_token;
+async function doFetch(functionName, body, token, anonKey, supabaseUrl) {
+  const endpoint = `${supabaseUrl}/functions/v1/${functionName}`;
+  const requestHeaders = {
+    Authorization: `Bearer ${token}`,
+    apikey: anonKey,
+    "Content-Type": "application/json",
+  };
+
+  devLog("request", {
+    functionName,
+    hasToken: Boolean(token),
+    tokenLength: token?.length || 0,
+    headers: {
+      Authorization: token ? `Bearer ${token.slice(0, 12)}...` : null,
+      apikey: anonKey ? `[present:${anonKey.length}]` : null,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: requestHeaders,
+    body: JSON.stringify(body),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  devLog("response", {
+    functionName,
+    status: response.status,
+    body: payload,
+  });
+
+  return { response, payload };
 }
 
 export async function invokeEdge(functionName, body = {}) {
@@ -41,34 +83,23 @@ export async function invokeEdge(functionName, body = {}) {
     });
   }
 
-  const token = await resolveAccessToken();
+  let token = await ensureToken();
+  let { response, payload } = await doFetch(functionName, body, token, supabaseAnonKey, supabaseUrl);
 
-  supabase.functions.setAuth(token);
-  const { data, error } = await supabase.functions.invoke(functionName, {
-    body,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: supabaseAnonKey,
-      "Content-Type": "application/json",
-    },
-  });
+  if (response.status === 401) {
+    devLog("retry", { functionName, reason: "401 detected, trying refreshSession once" });
+    await supabase.auth.refreshSession();
+    token = await ensureToken();
+    ({ response, payload } = await doFetch(functionName, body, token, supabaseAnonKey, supabaseUrl));
+  }
 
-  if (!error) return data;
-
-  if (error instanceof FunctionsHttpError) {
-    const response = error.context;
-    const status = response?.status || 500;
-    const payload = await response?.json?.().catch(() => ({}));
-    throw new EdgeFunctionError(payload?.error || `HTTP_${status}`, {
-      status,
+  if (!response.ok || payload?.ok === false) {
+    throw new EdgeFunctionError(payload?.error || `HTTP_${response.status}`, {
+      status: response.status,
       code: payload?.error || "EDGE_FUNCTION_FAILED",
       detail: payload?.detail || null,
     });
   }
 
-  throw new EdgeFunctionError(error.message || "EDGE_FUNCTION_FAILED", {
-    status: 500,
-    code: "EDGE_FUNCTION_FAILED",
-    detail: error.message || null,
-  });
+  return payload;
 }

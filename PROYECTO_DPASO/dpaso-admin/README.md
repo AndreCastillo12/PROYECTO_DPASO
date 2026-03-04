@@ -44,8 +44,19 @@ Configura en el proyecto:
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 - `DPASO_SERVICE_ROLE_KEY`
+- `ADMIN_ALLOWED_ORIGINS` (lista separada por comas)
 
 Si falta deploy o hay variables mal configuradas, en UI verás errores de conexión a Edge Function.
+
+
+#### `ADMIN_ALLOWED_ORIGINS` recomendado
+Define orígenes permitidos separados por coma, por ejemplo:
+
+```
+http://localhost:5173,https://admin.dpasococinalibre.com
+```
+
+> Si el origin no está permitido, las Edge Functions deben responder `403 ORIGIN_NOT_ALLOWED` (no 401).
 
 ### 4) Cliente admin (frontend)
 Asegúrate de tener en `.env` del panel admin:
