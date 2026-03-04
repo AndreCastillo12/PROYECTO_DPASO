@@ -34,8 +34,18 @@ Deno.serve(async (req) => {
     const anon = Deno.env.get("SUPABASE_ANON_KEY") || "";
     const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-    if (!url || !anon || !service) {
-      return jsonResponse(req, 500, { ok: false, error: "MISSING_SUPABASE_ENV" });
+    const missing = [
+      !url ? "SUPABASE_URL" : "",
+      !anon ? "SUPABASE_ANON_KEY" : "",
+      !service ? "SUPABASE_SERVICE_ROLE_KEY" : "",
+    ].filter(Boolean);
+
+    if (missing.length > 0) {
+      return jsonResponse(req, 500, {
+        ok: false,
+        error: "MISSING_SUPABASE_ENV",
+        detail: `Missing required env vars: ${missing.join(", ")}`,
+      });
     }
 
     const authHeader = req.headers.get("Authorization") || "";
@@ -53,7 +63,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     const callerRole = String(callerRoleRow?.role || "").trim().toLowerCase();
-    if (callerRole !== "admin") return jsonResponse(req, 403, { ok: false, error: "FORBIDDEN" });
+    if (!["admin", "superadmin"].includes(callerRole)) return jsonResponse(req, 403, { ok: false, error: "FORBIDDEN" });
 
     const body = await req.json();
     const email = String(body?.email || "").trim().toLowerCase();

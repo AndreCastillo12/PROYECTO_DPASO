@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 export const DEFAULT_ROLE = "none";
-export const VALID_ROLES = ["admin", "cajero", "mozo", "cocina"];
+export const VALID_ROLES = ["superadmin", "admin", "cajero", "mozo", "cocina"];
 
 export const ROLE_ALLOWED_AREAS = {
   none: [],
+  superadmin: ["*"],
   admin: ["*"],
   cajero: ["dashboard", "pedidos", "pedido-detalle", "clientes", "caja", "reportes"],
   mozo: ["dashboard", "pedidos", "pedido-detalle", "salon", "cocina"],

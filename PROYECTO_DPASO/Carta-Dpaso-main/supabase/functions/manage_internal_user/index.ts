@@ -34,8 +34,18 @@ Deno.serve(async (req) => {
     const anon = Deno.env.get("SUPABASE_ANON_KEY") || "";
     const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-    if (!url || !anon || !service) {
-      return jsonResponse(req, 500, { ok: false, error: "MISSING_SUPABASE_ENV" });
+    const missing = [
+      !url ? "SUPABASE_URL" : "",
+      !anon ? "SUPABASE_ANON_KEY" : "",
+      !service ? "SUPABASE_SERVICE_ROLE_KEY" : "",
+    ].filter(Boolean);
+
+    if (missing.length > 0) {
+      return jsonResponse(req, 500, {
+        ok: false,
+        error: "MISSING_SUPABASE_ENV",
+        detail: `Missing required env vars: ${missing.join(", ")}`,
+      });
     }
 
     const authHeader = req.headers.get("Authorization") || "";
@@ -52,7 +62,8 @@ Deno.serve(async (req) => {
       .eq("user_id", caller.id)
       .maybeSingle();
 
-    if (String(roleRow?.role || "").trim().toLowerCase() !== "admin") {
+    const callerRole = String(roleRow?.role || "").trim().toLowerCase();
+    if (!["admin", "superadmin"].includes(callerRole)) {
       return jsonResponse(req, 403, { ok: false, error: "FORBIDDEN" });
     }
 
@@ -62,6 +73,17 @@ Deno.serve(async (req) => {
 
     if (!action || !userId) return jsonResponse(req, 400, { ok: false, error: "ACTION_AND_USER_REQUIRED" });
     if (userId === caller.id) return jsonResponse(req, 400, { ok: false, error: "CANNOT_MANAGE_SELF" });
+
+    const { data: targetRoleRow } = await adminClient
+      .from("admin_panel_user_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const targetRole = String(targetRoleRow?.role || "").trim().toLowerCase();
+    if (targetRole === "superadmin" && callerRole !== "superadmin") {
+      return jsonResponse(req, 403, { ok: false, error: "FORBIDDEN_SUPERADMIN_TARGET" });
+    }
 
     if (action === "reset_password") {
       const newPassword = String(body?.new_password || "").trim();
