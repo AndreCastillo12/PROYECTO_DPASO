@@ -32,6 +32,8 @@ function buildPlatoCard(item) {
   const card = document.createElement('div');
   card.className = 'plato fade-up';
 
+  const soldOut = isPlatoSoldOut(item);
+
   const image = document.createElement('img');
   image.src = buildImageUrl(item.imagen);
   image.alt = item.nombre;
@@ -46,8 +48,15 @@ function buildPlatoCard(item) {
   price.textContent = `S/ ${Number(item.precio).toFixed(2)}`;
 
   card.append(image, title, description, price);
-  observeFadeElement(card);
 
+  if (soldOut) {
+    const availabilityBadge = document.createElement('small');
+    availabilityBadge.className = 'plato-availability';
+    availabilityBadge.textContent = getPlatoAvailabilityMessage(item);
+    card.appendChild(availabilityBadge);
+  }
+
+  observeFadeElement(card);
   return card;
 }
 
@@ -77,9 +86,24 @@ function buildCategoryTitle(category) {
 function buildNavLink(category) {
   const navLink = document.createElement('a');
   navLink.href = `#${category.id}`;
+  navLink.dataset.category = category.id;
   navLink.textContent = category.nombre;
 
   return navLink;
+}
+
+function isPlatoSoldOut(plato) {
+  if (!plato) return false;
+  if (plato.is_available === false) return true;
+  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return true;
+  return false;
+}
+
+function getPlatoAvailabilityMessage(plato) {
+  if (!plato) return '';
+  if (plato.is_available === false) return 'No disponible';
+  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return 'No disponible';
+  return '';
 }
 
 function groupPlatosByCategory(platos) {
@@ -90,9 +114,52 @@ function groupPlatosByCategory(platos) {
   }, new Map());
 }
 
+function setupActiveCategory(nav, categorias) {
+  if (!nav || categorias.length === 0) return;
+
+  const setActive = (id) => {
+    const links = nav.querySelectorAll('a');
+    links.forEach((link) => {
+      const isActive = link.dataset.category === String(id);
+      link.classList.toggle('active', isActive);
+      if (isActive) {
+        link.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    });
+  };
+
+  const headingElements = categorias
+    .map((category) => document.getElementById(category.id))
+    .filter(Boolean);
+
+  if (headingElements.length === 0) return;
+
+  const observer = new IntersectionObserver((entries) => {
+    const visible = entries
+      .filter((entry) => entry.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+
+    if (!visible.length) return;
+    setActive(visible[0].target.id);
+  }, {
+    rootMargin: '-30% 0px -55% 0px',
+    threshold: [0.1, 0.3, 0.6],
+  });
+
+  headingElements.forEach((el) => observer.observe(el));
+
+  nav.addEventListener('click', (event) => {
+    const link = event.target.closest('a[data-category]');
+    if (!link) return;
+    setActive(link.dataset.category);
+  });
+
+  setActive(categorias[0].id);
+}
+
 async function fetchMenuData() {
   const [platosResponse, categoriasResponse] = await Promise.all([
-    supabaseClient.from('platos').select('*').order('orden', { ascending: true }),
+    supabaseClient.from('platos').select('id,nombre,descripcion,precio,imagen,categoria_id,orden,is_available,track_stock,stock').order('orden', { ascending: true }),
     supabaseClient.from('categorias').select('*').order('orden', { ascending: true }),
   ]);
 
@@ -137,6 +204,7 @@ async function cargarMenu() {
 
     menu.replaceChildren(menuFragment);
     nav.replaceChildren(navFragment);
+    setupActiveCategory(nav, categorias);
   } catch (err) {
     console.error('❌ Error cargando menú:', err);
     menu.innerHTML = '<p>Error cargando el menú. Revisa la consola.</p>';

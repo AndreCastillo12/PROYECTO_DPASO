@@ -11,6 +11,7 @@ const STATUS_LABEL = {
   preparing: "En preparación",
   ready: "Listo",
 };
+const BUSINESS_TIMEZONE = "America/Lima";
 
 function statusBadge(status) {
   if (status === "ready") return { background: "#dcfce7", color: "#166534" };
@@ -33,6 +34,28 @@ function errMsg(error, fallback) {
   return getUserErrorMessage(error, fallback);
 }
 
+function toDateInputValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toBusinessDateInput(value) {
+  if (!value) return "";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "";
+
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BUSINESS_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  return formatter.format(dt);
+}
+
 export default function Cocina() {
   const { toast, showToast } = useToast(3000);
   const { canAccess } = useAdminRole();
@@ -40,6 +63,7 @@ export default function Cocina() {
   const [busyId, setBusyId] = useState(null);
   const [commands, setCommands] = useState([]);
   const [commandItems, setCommandItems] = useState([]);
+  const [selectedDate, setSelectedDate] = useState(() => toDateInputValue(new Date()));
 
   const loadData = async () => {
     setLoading(true);
@@ -48,31 +72,42 @@ export default function Cocina() {
       showToast(errMsg(syncError, "No se pudo sincronizar comandas web"), "warning");
     }
 
-    const [cmdResp, itemsResp] = await Promise.all([
-      supabase
-        .from("kitchen_commands")
-        .select("id,ticket_id,order_id,table_id,table_name_snapshot,ticket_code_snapshot,note,status,source_type,created_at")
-        .order("created_at", { ascending: false })
-        .in("status", ["pending", "preparing", "ready"]),
-      supabase
+    const cmdResp = await supabase
+      .from("kitchen_commands")
+      .select("id,ticket_id,order_id,table_id,table_name_snapshot,ticket_code_snapshot,note,status,source_type,created_at")
+      .order("created_at", { ascending: false })
+      .in("status", ["pending", "preparing", "ready"]);
+
+    if (cmdResp.error) {
+      showToast(errMsg(cmdResp.error, "Error cargando comandas"), "error");
+      setCommands([]);
+      setCommandItems([]);
+      setLoading(false);
+      return;
+    }
+
+    const filteredCommands = (cmdResp.data || []).filter((command) => toBusinessDateInput(command.created_at) === selectedDate);
+    const commandIds = filteredCommands.map((command) => command.id);
+
+    let itemsResp = { data: [], error: null };
+    if (commandIds.length > 0) {
+      itemsResp = await supabase
         .from("kitchen_command_items")
         .select("id,command_id,name_snapshot,qty")
-        .order("created_at", { ascending: true }),
-    ]);
+        .in("command_id", commandIds)
+        .order("created_at", { ascending: true });
+    }
 
-    if (cmdResp.error) showToast(errMsg(cmdResp.error, "Error cargando comandas"), "error");
     if (itemsResp.error) showToast(errMsg(itemsResp.error, "Error cargando items de comanda"), "error");
 
-    setCommands(cmdResp.data || []);
+    setCommands(filteredCommands);
     setCommandItems(itemsResp.data || []);
     setLoading(false);
   };
 
   useEffect(() => {
     loadData();
-  }, []);
-
-
+  }, [selectedDate]);
 
   const groupedCommands = useMemo(() => {
     const map = new Map();
@@ -94,6 +129,7 @@ export default function Cocina() {
         return bTime - aTime;
       });
   }, [commands]);
+
   const itemsByCommand = useMemo(() => {
     const map = new Map();
     commandItems.forEach((item) => {
@@ -132,8 +168,19 @@ export default function Cocina() {
     <div style={{ display: "grid", gap: 12 }}>
       <Toast toast={toast} />
       <h2 style={{ margin: 0 }}>Cocina (Comandas)</h2>
+      <section style={{ background: "#fff", borderRadius: 12, padding: 12, display: "grid", gap: 8 }}>
+        <label htmlFor="command-date" style={{ fontWeight: 600, color: "#111827" }}>Filtrar por fecha</label>
+        <input
+          id="command-date"
+          type="date"
+          value={selectedDate}
+          max={toDateInputValue(new Date())}
+          onChange={(event) => setSelectedDate(event.target.value)}
+          style={{ width: "fit-content", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", color: "#111827" }}
+        />
+      </section>
       <section style={{ background: "#fff", borderRadius: 12, padding: 12 }}>
-        {commands.length === 0 ? <p>No hay comandas activas.</p> : (
+        {commands.length === 0 ? <p>No hay comandas para la fecha seleccionada.</p> : (
           <div style={{ display: "grid", gap: 12 }}>
             {groupedCommands.map(({ groupName, list }) => (
               <article key={groupName} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
