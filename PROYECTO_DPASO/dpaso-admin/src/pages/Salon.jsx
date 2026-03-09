@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { getUserErrorMessage } from "../lib/userError";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import useAdminRole from "../hooks/useAdminRole";
@@ -9,8 +10,15 @@ function money(v) {
 }
 
 function errMsg(error, fallback) {
-  const msg = String(error?.message || "").trim();
-  return msg ? `${fallback}: ${msg}` : fallback;
+  return getUserErrorMessage(error, fallback);
+}
+
+const BEVERAGE_TERMS = ["bebida", "bebidas", "drink", "trago", "jugo", "gaseosa", "agua", "cerveza", "refresco", "coctel", "cóctel"];
+
+function isBeverageLabel(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return false;
+  return BEVERAGE_TERMS.some((term) => text.includes(term));
 }
 
 async function loadPlatosCompatible() {
@@ -79,6 +87,8 @@ export default function Salon() {
   const [cashReceived, setCashReceived] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
   const [hasOpenCashSession, setHasOpenCashSession] = useState(false);
+  const [commandNote, setCommandNote] = useState("");
+  const [kitchenCommandStats, setKitchenCommandStats] = useState({ inProgress: 0, sentQtyByItem: new Map() });
 
   async function refreshAll() {
     setLoading(true);
@@ -127,7 +137,46 @@ export default function Salon() {
       return;
     }
 
-    setItems(data || []);
+    const nextItems = data || [];
+    setItems(nextItems);
+
+    const { data: commandsData, error: commandsError } = await supabase
+      .from("kitchen_commands")
+      .select("id,status")
+      .eq("ticket_id", ticketId)
+      .eq("source_type", "salon");
+
+    if (commandsError) {
+      showToast(errMsg(commandsError, "Error cargando estado de comandas"), "warning");
+      setKitchenCommandStats({ inProgress: 0, sentQtyByItem: new Map() });
+      return;
+    }
+
+    const commandIds = (commandsData || []).map((command) => command.id);
+    const inProgress = (commandsData || []).filter((command) => ["pending", "preparing"].includes(command.status)).length;
+    if (!commandIds.length) {
+      setKitchenCommandStats({ inProgress, sentQtyByItem: new Map() });
+      return;
+    }
+
+    const { data: commandItemsData, error: commandItemsError } = await supabase
+      .from("kitchen_command_items")
+      .select("ticket_item_id,qty")
+      .in("command_id", commandIds);
+
+    if (commandItemsError) {
+      showToast(errMsg(commandItemsError, "Error cargando estado de envío a cocina"), "warning");
+      setKitchenCommandStats({ inProgress, sentQtyByItem: new Map() });
+      return;
+    }
+
+    const sentQtyByItem = new Map();
+    (commandItemsData || []).forEach((row) => {
+      if (!row.ticket_item_id) return;
+      const prev = Number(sentQtyByItem.get(row.ticket_item_id) || 0);
+      sentQtyByItem.set(row.ticket_item_id, prev + Number(row.qty || 0));
+    });
+    setKitchenCommandStats({ inProgress, sentQtyByItem });
   }
 
   useEffect(() => {
@@ -163,6 +212,35 @@ export default function Salon() {
   }, [activeTables, openTicketByTable]);
 
   const total = useMemo(() => items.reduce((acc, it) => acc + (Number(it.qty || 0) * Number(it.price_snapshot || 0)), 0), [items]);
+  const categoryNameById = useMemo(() => new Map(categorias.map((c) => [String(c.id), c.nombre || ""])), [categorias]);
+  const platoById = useMemo(() => new Map(platos.map((p) => [String(p.id), p])), [platos]);
+
+  function isKitchenRequired(item) {
+    const plato = platoById.get(String(item.plato_id || ""));
+    const categoryName = categoryNameById.get(String(plato?.categoria_id || ""));
+    const beverage = isBeverageLabel(categoryName) || isBeverageLabel(plato?.nombre) || isBeverageLabel(item.name_snapshot);
+    return !beverage;
+  }
+
+  const pendingToSendQty = useMemo(
+    () => items.reduce((acc, item) => {
+      if (!isKitchenRequired(item)) return acc;
+      const sent = Number(kitchenCommandStats.sentQtyByItem.get(item.id) || 0);
+      const pending = Math.max(0, Number(item.qty || 0) - sent);
+      return acc + pending;
+    }, 0),
+    [items, kitchenCommandStats, categoryNameById, platoById],
+  );
+  const hasKitchenItems = useMemo(() => items.some((item) => isKitchenRequired(item)), [items, categoryNameById, platoById]);
+  const isOnlyBeverageTicket = items.length > 0 && !hasKitchenItems;
+  const canMoveToClosing = pendingToSendQty === 0 && kitchenCommandStats.inProgress === 0;
+  const totalNumber = Number(total || 0);
+  const cashReceivedNumber = Number(cashReceived || 0);
+  const cashChange = paymentMethod === "cash" ? Math.max(0, cashReceivedNumber - totalNumber) : 0;
+  const hasCashInput = String(cashReceived || "").trim() !== "";
+  const isCashInsufficient = paymentMethod === "cash" && cashReceivedNumber < totalNumber;
+  const shouldShowCashInsufficient = paymentMethod === "cash" && hasCashInput && isCashInsufficient;
+  const isClosingTicket = selectedTicket?.status === "closing";
 
   const filteredPlatos = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -263,18 +341,20 @@ export default function Salon() {
 
   async function setTicketStatus(nextStatus) {
     if (!selectedTicket?.id) return;
+    if (nextStatus === "closing" && !canMoveToClosing) {
+      showToast("No puedes pasar a cobro: aún hay platos por enviar o en preparación en cocina.", "warning");
+      return;
+    }
     setBusy(true);
     const { data, error } = await supabase
-      .from("table_tickets")
-      .update({ status: nextStatus, updated_at: new Date().toISOString() })
-      .eq("id", selectedTicket.id)
-      .select("id,table_id,status,payment_status,opened_at,generated_order_id")
-      .single();
+      .rpc("rpc_salon_set_ticket_status", { p_ticket_id: selectedTicket.id, p_next_status: nextStatus });
+
     if (error) {
       showToast(errMsg(error, "No se pudo actualizar estado"), "error");
       setBusy(false);
       return;
     }
+
     setTickets((prev) => prev.map((t) => (t.id === data.id ? data : t)));
     setSelectedTicket(data);
     setBusy(false);
@@ -283,6 +363,10 @@ export default function Salon() {
   async function addItem(plato) {
     if (!selectedTicket?.id || selectedTicket.status === "closed") {
       showToast("Abre un ticket primero", "warning");
+      return;
+    }
+    if (isClosingTicket) {
+      showToast("El ticket está en cobro. Vuelve a edición para modificar items.", "warning");
       return;
     }
 
@@ -312,10 +396,13 @@ export default function Salon() {
       showToast("Selecciona un ticket", "warning");
       return;
     }
+    if (pendingToSendQty <= 0) {
+      return;
+    }
     setBusy(true);
     const { error } = await supabase.rpc("rpc_salon_send_to_kitchen", {
       p_ticket_id: selectedTicket.id,
-      p_note: null,
+      p_note: String(commandNote || "").trim() || null,
     });
     if (error) {
       showToast(errMsg(error, "No se pudo enviar a cocina"), "error");
@@ -324,11 +411,16 @@ export default function Salon() {
     }
     await refreshAll();
     await refreshTicketItems(selectedTicket.id);
+    setCommandNote("");
     setBusy(false);
     showToast("Comanda enviada a cocina", "success");
   }
 
   async function changeQty(item, delta) {
+    if (isClosingTicket) {
+      showToast("El ticket está en cobro. Vuelve a edición para modificar items.", "warning");
+      return;
+    }
     const next = Number(item.qty || 0) + delta;
     if (next <= 0) {
       await removeItem(item.id);
@@ -351,6 +443,10 @@ export default function Salon() {
   }
 
   async function removeItem(itemId) {
+    if (isClosingTicket) {
+      showToast("El ticket está en cobro. Vuelve a edición para modificar items.", "warning");
+      return;
+    }
     setBusy(true);
     const { error } = await supabase.from("table_ticket_items").delete().eq("id", itemId);
     if (error) {
@@ -362,14 +458,44 @@ export default function Salon() {
     setBusy(false);
   }
 
+  async function updateItemNotes(itemId, notes) {
+    if (isClosingTicket) {
+      return;
+    }
+    const cleanNotes = String(notes || "").trim() || null;
+    const { data, error } = await supabase
+      .from("table_ticket_items")
+      .update({ notes: cleanNotes })
+      .eq("id", itemId)
+      .select("id,notes")
+      .single();
+
+    if (error) {
+      showToast(errMsg(error, "No se pudo guardar observación"), "warning");
+      return;
+    }
+
+    setItems((prev) => prev.map((it) => (it.id === data.id ? { ...it, notes: data.notes } : it)));
+  }
+
   async function finalizeTicketPayment() {
     if (!selectedTicket?.id) {
       showToast("Selecciona ticket", "warning");
       return;
     }
 
+    if (!canMoveToClosing) {
+      showToast("No puedes cobrar este ticket porque aún hay platos pendientes en cocina o por enviar.", "warning");
+      return;
+    }
+
     if (paymentMethod === "cash" && !hasOpenCashSession) {
       showToast("Para pago en efectivo debes abrir caja", "error");
+      return;
+    }
+
+    if (isCashInsufficient) {
+      showToast("El monto recibido no es suficiente para completar el cobro.", "warning");
       return;
     }
 
@@ -455,10 +581,15 @@ export default function Salon() {
         {!selectedTicket || selectedTicket.status === "closed" ? <p>Selecciona mesa y abre ticket.</p> : (
           <>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-              <button type="button" style={btnGhost} disabled={busy || !canAccess("salon")} onClick={sendTicketToKitchen}>Enviar cocina</button>
-              <button type="button" style={btnGhost} disabled={busy || !["open", "sent_to_kitchen", "ready"].includes(selectedTicket?.status)} onClick={() => setTicketStatus("closing")}>En cobro</button>
+              <button type="button" style={btnGhost} disabled={busy || !canAccess("salon") || pendingToSendQty <= 0 || isClosingTicket} onClick={sendTicketToKitchen}>Enviar cocina</button>
+              <button type="button" style={btnGhost} disabled={busy || !["open", "sent_to_kitchen", "ready"].includes(selectedTicket?.status) || !canMoveToClosing} onClick={() => setTicketStatus("closing")}>En cobro</button>
+              {isClosingTicket ? <button type="button" style={btnGhost} disabled={busy} onClick={() => setTicketStatus("open")}>Volver a edición</button> : null}
               <button type="button" style={btnGhost} disabled={!items.length} onClick={() => printPrecuenta({ tableName: selectedTable?.table_name || "Mesa", ticketId: selectedTicket.id, items, total })}>Precuenta</button>
             </div>
+            <small style={{ color: "#6b7280" }}>
+              Pendientes por enviar: {pendingToSendQty} · Comandas en cocina: {kitchenCommandStats.inProgress}
+              {isOnlyBeverageTicket ? " · Solo bebidas: no requiere envío a cocina" : ""}
+            </small>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
               <div>
@@ -475,7 +606,7 @@ export default function Salon() {
                       <span>{plato.nombre}</span>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                         <strong>{money(plato.precio)}</strong>
-                        <button type="button" style={btnPrimaryMini} disabled={busy} onClick={() => addItem(plato)}>Agregar</button>
+                        <button type="button" style={btnPrimaryMini} disabled={busy || isClosingTicket} onClick={() => addItem(plato)}>Agregar</button>
                       </div>
                     </div>
                   ))}
@@ -485,17 +616,28 @@ export default function Salon() {
               <div>
                 <div style={{ display: "grid", gap: 6, maxHeight: 360, overflow: "auto" }}>
                   {items.length === 0 ? <p>Sin items</p> : items.map((item) => (
-                    <div key={item.id} style={row}>
-                      <div>
+                    <div key={item.id} style={{ ...row, alignItems: "stretch" }}>
+                      <div style={{ display: "grid", gap: 6, flex: 1 }}>
                         <strong>{item.name_snapshot}</strong>
                         <small style={{ display: "block", color: "#6b7280" }}>{money(item.price_snapshot)} c/u</small>
+                        <input
+                          style={inputStyle}
+                          disabled={busy || isClosingTicket}
+                          value={item.notes || ""}
+                          placeholder="Observación para cocina (ej. sin picante)"
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setItems((prev) => prev.map((it) => (it.id === item.id ? { ...it, notes: value } : it)));
+                          }}
+                          onBlur={(e) => updateItemNotes(item.id, e.target.value)}
+                        />
                       </div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <button type="button" style={btnGhost} disabled={busy} onClick={() => changeQty(item, -1)}>-</button>
+                        <button type="button" style={btnGhost} disabled={busy || isClosingTicket} onClick={() => changeQty(item, -1)}>-</button>
                         <strong>{item.qty}</strong>
-                        <button type="button" style={btnGhost} disabled={busy} onClick={() => changeQty(item, 1)}>+</button>
+                        <button type="button" style={btnGhost} disabled={busy || isClosingTicket} onClick={() => changeQty(item, 1)}>+</button>
                         <strong>{money(Number(item.qty) * Number(item.price_snapshot))}</strong>
-                        <button type="button" style={btnDangerGhost} disabled={busy} onClick={() => removeItem(item.id)}>Quitar</button>
+                        <button type="button" style={btnDangerGhost} disabled={busy || isClosingTicket} onClick={() => removeItem(item.id)}>Quitar</button>
                       </div>
                     </div>
                   ))}
@@ -503,6 +645,7 @@ export default function Salon() {
                 <p style={{ marginTop: 10 }}><strong>Total: {money(total)}</strong></p>
 
                 <div style={{ display: "grid", gap: 8 }}>
+                  <textarea style={inputStyle} rows={2} placeholder="Indicaciones generales para cocina (opcional)" value={commandNote} onChange={(e) => setCommandNote(e.target.value)} disabled={busy || isClosingTicket} />
                   <select style={inputStyle} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
                     <option value="cash">Efectivo</option>
                     <option value="yape">Yape</option>
@@ -512,12 +655,18 @@ export default function Salon() {
                     <option value="other">Otro</option>
                   </select>
                   {paymentMethod === "cash" ? (
-                    <input style={inputStyle} type="number" min="0" step="0.01" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} placeholder="Paga con" />
+                    <>
+                      <input style={inputStyle} type="number" min="0" step="0.01" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} placeholder="Monto recibido" />
+                      <small style={{ color: "#374151" }}>
+                        Total: {money(totalNumber)} · Recibido: {money(cashReceivedNumber)} · Vuelto: {money(cashChange)}
+                      </small>
+                      {shouldShowCashInsufficient ? <small style={{ color: "#b3261e" }}>El monto recibido no es suficiente para completar el cobro.</small> : null}
+                    </>
                   ) : (
                     <input style={inputStyle} type="text" value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} placeholder="Referencia" />
                   )}
                   {!hasOpenCashSession && paymentMethod !== "cash" ? <small style={{ color: "#a16207" }}>Aviso: caja cerrada. Pago no-efectivo permitido.</small> : null}
-                  <button type="button" style={btnDanger} disabled={busy || selectedTicket?.status !== "closing"} onClick={finalizeTicketPayment}>Cerrar ticket / Cobrar</button>
+                  <button type="button" style={btnDanger} disabled={busy || selectedTicket?.status !== "closing" || !canMoveToClosing || isCashInsufficient} onClick={finalizeTicketPayment}>Cerrar ticket / Cobrar</button>
                 </div>
               </div>
             </div>

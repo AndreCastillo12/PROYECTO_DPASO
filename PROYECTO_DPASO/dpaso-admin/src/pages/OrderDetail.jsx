@@ -15,6 +15,11 @@ function normalizeStatus(status) {
   return NORMALIZED_STATUS[key] || key || "pending";
 }
 
+function isLocalSalonOrder(order) {
+  const text = String(order?.modalidad || "").toLowerCase();
+  return ["salon", "salón", "mesa", "local"].some((token) => text.includes(token));
+}
+
 function isPickupOrder(order) {
   const text = String(order?.modalidad || "").toLowerCase();
   return ["recojo", "recoger", "pickup", "pick-up", "tienda", "local"].some((token) => text.includes(token));
@@ -98,6 +103,7 @@ export default function OrderDetail() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [paymentError, setPaymentError] = useState("");
+  const [ticketHistoryEvents, setTicketHistoryEvents] = useState([]);
 
   useEffect(() => {
     let mounted = true;
@@ -120,6 +126,7 @@ export default function OrderDetail() {
 
       if (!current?.id) {
         setOrderItems([]);
+        setTicketHistoryEvents([]);
         setLoading(false);
         return;
       }
@@ -132,6 +139,19 @@ export default function OrderDetail() {
 
       if (!mounted) return;
       setOrderItems(itemsRows || []);
+
+      if (isLocalSalonOrder(current) && current.ticket_id) {
+        const { data: eventRows } = await supabase
+          .from("ticket_lifecycle_events")
+          .select("id,event_key,event_label,payload,created_at")
+          .eq("ticket_id", current.ticket_id)
+          .order("created_at", { ascending: true });
+        if (!mounted) return;
+        setTicketHistoryEvents(eventRows || []);
+      } else {
+        setTicketHistoryEvents([]);
+      }
+
       setLoading(false);
     }
 
@@ -145,6 +165,16 @@ export default function OrderDetail() {
 
   const historyRows = useMemo(() => {
     if (!selectedOrder) return [];
+
+    if (isLocalSalonOrder(selectedOrder) && selectedOrder.ticket_id && ticketHistoryEvents.length > 0) {
+      return ticketHistoryEvents.map((event) => ({
+        key: event.id,
+        label: event.event_label || "Evento",
+        at: event.created_at,
+        tone: String(event.event_key || "").includes("closed") ? "done" : "current",
+      }));
+    }
+
     const rows = [
       { key: "creado", label: "Pedido creado", at: selectedOrder.created_at, tone: "done" },
       { key: "pagado", label: selectedOrder.paid ? "Pago registrado" : "Pago pendiente", at: selectedOrder.paid_at || selectedOrder.created_at, tone: selectedOrder.paid ? "done" : "muted" },
@@ -156,7 +186,7 @@ export default function OrderDetail() {
     }
 
     return rows;
-  }, [selectedOrder]);
+  }, [selectedOrder, ticketHistoryEvents]);
 
   const updateStatus = async (nextStatus) => {
     if (!selectedOrder?.id || !ORDER_STATUS.includes(nextStatus)) return;

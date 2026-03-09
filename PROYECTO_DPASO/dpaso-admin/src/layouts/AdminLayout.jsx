@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FiBarChart2,
   FiBox,
-  FiCalendar,
   FiClock,
   FiGrid,
   FiList,
@@ -183,9 +182,6 @@ export default function AdminLayout() {
           </div>
 
           <div className="admin-topbar-right">
-            <button className="admin-icon-btn" type="button" aria-label="Calendario"><FiCalendar size={15} /></button>
-            <button className="admin-icon-btn" type="button" aria-label="Métricas"><FiBarChart2 size={15} /></button>
-
             <div className="admin-profile-menu" ref={profileMenuRef}>
               <button className="admin-user-pill" type="button" onClick={() => setProfileMenuOpen((prev) => !prev)} aria-expanded={profileMenuOpen}>
                 <div className="admin-avatar-sm">
