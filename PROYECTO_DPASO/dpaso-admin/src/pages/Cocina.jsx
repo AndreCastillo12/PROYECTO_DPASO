@@ -33,6 +33,25 @@ function errMsg(error, fallback) {
   return getUserErrorMessage(error, fallback);
 }
 
+function toDateInputValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function buildDayRange(dateInput) {
+  const [year, month, day] = String(dateInput || "").split("-").map(Number);
+  if (!year || !month || !day) return null;
+
+  const start = new Date(year, month - 1, day, 0, 0, 0, 0);
+  const end = new Date(year, month - 1, day, 23, 59, 59, 999);
+  return {
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+  };
+}
+
 export default function Cocina() {
   const { toast, showToast } = useToast(3000);
   const { canAccess } = useAdminRole();
@@ -40,25 +59,37 @@ export default function Cocina() {
   const [busyId, setBusyId] = useState(null);
   const [commands, setCommands] = useState([]);
   const [commandItems, setCommandItems] = useState([]);
+  const [selectedDate, setSelectedDate] = useState(() => toDateInputValue(new Date()));
 
   const loadData = async () => {
+    const dayRange = buildDayRange(selectedDate);
     setLoading(true);
     const { error: syncError } = await supabase.rpc("rpc_sync_web_orders_to_kitchen");
     if (syncError) {
       showToast(errMsg(syncError, "No se pudo sincronizar comandas web"), "warning");
     }
 
-    const [cmdResp, itemsResp] = await Promise.all([
-      supabase
-        .from("kitchen_commands")
-        .select("id,ticket_id,order_id,table_id,table_name_snapshot,ticket_code_snapshot,note,status,source_type,created_at")
-        .order("created_at", { ascending: false })
-        .in("status", ["pending", "preparing", "ready"]),
-      supabase
+    let commandQuery = supabase
+      .from("kitchen_commands")
+      .select("id,ticket_id,order_id,table_id,table_name_snapshot,ticket_code_snapshot,note,status,source_type,created_at")
+      .order("created_at", { ascending: false })
+      .in("status", ["pending", "preparing", "ready"]);
+
+    if (dayRange) {
+      commandQuery = commandQuery.gte("created_at", dayRange.startIso).lte("created_at", dayRange.endIso);
+    }
+
+    const cmdResp = await commandQuery;
+
+    let itemsResp = { data: [], error: null };
+    const commandIds = (cmdResp.data || []).map((command) => command.id);
+    if (commandIds.length > 0) {
+      itemsResp = await supabase
         .from("kitchen_command_items")
         .select("id,command_id,name_snapshot,qty")
-        .order("created_at", { ascending: true }),
-    ]);
+        .in("command_id", commandIds)
+        .order("created_at", { ascending: true });
+    }
 
     if (cmdResp.error) showToast(errMsg(cmdResp.error, "Error cargando comandas"), "error");
     if (itemsResp.error) showToast(errMsg(itemsResp.error, "Error cargando items de comanda"), "error");
@@ -70,7 +101,7 @@ export default function Cocina() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [selectedDate]);
 
 
 
@@ -132,8 +163,19 @@ export default function Cocina() {
     <div style={{ display: "grid", gap: 12 }}>
       <Toast toast={toast} />
       <h2 style={{ margin: 0 }}>Cocina (Comandas)</h2>
+      <section style={{ background: "#fff", borderRadius: 12, padding: 12, display: "grid", gap: 8 }}>
+        <label htmlFor="command-date" style={{ fontWeight: 600, color: "#111827" }}>Filtrar por fecha</label>
+        <input
+          id="command-date"
+          type="date"
+          value={selectedDate}
+          max={toDateInputValue(new Date())}
+          onChange={(event) => setSelectedDate(event.target.value)}
+          style={{ width: "fit-content", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", color: "#111827" }}
+        />
+      </section>
       <section style={{ background: "#fff", borderRadius: 12, padding: 12 }}>
-        {commands.length === 0 ? <p>No hay comandas activas.</p> : (
+        {commands.length === 0 ? <p>No hay comandas para la fecha seleccionada.</p> : (
           <div style={{ display: "grid", gap: 12 }}>
             {groupedCommands.map(({ groupName, list }) => (
               <article key={groupName} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>

@@ -32,6 +32,8 @@ function buildPlatoCard(item) {
   const card = document.createElement('div');
   card.className = 'plato fade-up';
 
+  const soldOut = isPlatoSoldOut(item);
+
   const image = document.createElement('img');
   image.src = buildImageUrl(item.imagen);
   image.alt = item.nombre;
@@ -45,7 +47,12 @@ function buildPlatoCard(item) {
   const price = document.createElement('span');
   price.textContent = `S/ ${Number(item.precio).toFixed(2)}`;
 
-  card.append(image, title, description, price);
+  const availabilityBadge = document.createElement('small');
+  availabilityBadge.className = 'plato-availability';
+  availabilityBadge.textContent = getPlatoAvailabilityMessage(item);
+  availabilityBadge.hidden = !soldOut;
+
+  card.append(image, title, description, price, availabilityBadge);
   observeFadeElement(card);
 
   return card;
@@ -82,6 +89,21 @@ function buildNavLink(category) {
   return navLink;
 }
 
+
+function isPlatoSoldOut(plato) {
+  if (!plato) return false;
+  if (plato.is_available === false) return true;
+  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return true;
+  return false;
+}
+
+function getPlatoAvailabilityMessage(plato) {
+  if (!plato) return '';
+  if (plato.is_available === false) return 'No disponible';
+  if (plato.track_stock === true && (plato.stock == null || Number(plato.stock) <= 0)) return 'No disponible';
+  return '';
+}
+
 function groupPlatosByCategory(platos) {
   return platos.reduce((acc, plato) => {
     if (!acc.has(plato.categoria_id)) acc.set(plato.categoria_id, []);
@@ -92,7 +114,7 @@ function groupPlatosByCategory(platos) {
 
 async function fetchMenuData() {
   const [platosResponse, categoriasResponse] = await Promise.all([
-    supabaseClient.from('platos').select('*').order('orden', { ascending: true }),
+    supabaseClient.from('platos').select('id,nombre,descripcion,precio,imagen,categoria_id,orden,is_available,track_stock,stock').order('orden', { ascending: true }),
     supabaseClient.from('categorias').select('*').order('orden', { ascending: true }),
   ]);
 

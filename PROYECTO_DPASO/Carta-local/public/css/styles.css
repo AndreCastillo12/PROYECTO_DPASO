@@ -121,8 +121,9 @@ img {
   z-index: 100;
   background: var(--color-secondary);
   display: flex;
-  justify-content: space-around;
-  padding: 12px 5px;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 10px;
 }
 
 .nav a {
@@ -130,10 +131,16 @@ img {
   font-size: 0.85rem;
   font-weight: bold;
   color: var(--color-white);
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
 }
 
 .nav a:hover {
-  text-decoration: underline;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* ===============================
@@ -202,6 +209,18 @@ img {
   color: var(--color-secondary);
 }
 
+.plato-availability {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+
 /* ===============================
    FOOTER
 ================================ */
@@ -263,11 +282,6 @@ footer {
 
   .nav {
     flex-wrap: wrap;
-    gap: 8px 10px;
-  }
-
-  .nav a {
-    white-space: nowrap;
   }
 
   .menu {
@@ -276,6 +290,24 @@ footer {
 }
 
 @media (max-width: 768px) {
+  .nav {
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    padding: 10px 12px;
+  }
+
+  .nav::-webkit-scrollbar {
+    height: 5px;
+  }
+
+  .nav::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.35);
+    border-radius: 999px;
+  }
+
   .menu {
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
@@ -293,10 +325,6 @@ footer {
 
   .header-text p {
     font-size: 0.8rem;
-  }
-
-  .nav {
-    justify-content: center;
   }
 
   .menu {
