@@ -47,14 +47,16 @@ function buildPlatoCard(item) {
   const price = document.createElement('span');
   price.textContent = `S/ ${Number(item.precio).toFixed(2)}`;
 
-  const availabilityBadge = document.createElement('small');
-  availabilityBadge.className = 'plato-availability';
-  availabilityBadge.textContent = getPlatoAvailabilityMessage(item);
-  availabilityBadge.hidden = !soldOut;
+  card.append(image, title, description, price);
 
-  card.append(image, title, description, price, availabilityBadge);
+  if (soldOut) {
+    const availabilityBadge = document.createElement('small');
+    availabilityBadge.className = 'plato-availability';
+    availabilityBadge.textContent = getPlatoAvailabilityMessage(item);
+    card.appendChild(availabilityBadge);
+  }
+
   observeFadeElement(card);
-
   return card;
 }
 
@@ -84,11 +86,11 @@ function buildCategoryTitle(category) {
 function buildNavLink(category) {
   const navLink = document.createElement('a');
   navLink.href = `#${category.id}`;
+  navLink.dataset.category = category.id;
   navLink.textContent = category.nombre;
 
   return navLink;
 }
-
 
 function isPlatoSoldOut(plato) {
   if (!plato) return false;
@@ -110,6 +112,49 @@ function groupPlatosByCategory(platos) {
     acc.get(plato.categoria_id).push(plato);
     return acc;
   }, new Map());
+}
+
+function setupActiveCategory(nav, categorias) {
+  if (!nav || categorias.length === 0) return;
+
+  const setActive = (id) => {
+    const links = nav.querySelectorAll('a');
+    links.forEach((link) => {
+      const isActive = link.dataset.category === String(id);
+      link.classList.toggle('active', isActive);
+      if (isActive) {
+        link.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    });
+  };
+
+  const headingElements = categorias
+    .map((category) => document.getElementById(category.id))
+    .filter(Boolean);
+
+  if (headingElements.length === 0) return;
+
+  const observer = new IntersectionObserver((entries) => {
+    const visible = entries
+      .filter((entry) => entry.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+
+    if (!visible.length) return;
+    setActive(visible[0].target.id);
+  }, {
+    rootMargin: '-30% 0px -55% 0px',
+    threshold: [0.1, 0.3, 0.6],
+  });
+
+  headingElements.forEach((el) => observer.observe(el));
+
+  nav.addEventListener('click', (event) => {
+    const link = event.target.closest('a[data-category]');
+    if (!link) return;
+    setActive(link.dataset.category);
+  });
+
+  setActive(categorias[0].id);
 }
 
 async function fetchMenuData() {
@@ -159,6 +204,7 @@ async function cargarMenu() {
 
     menu.replaceChildren(menuFragment);
     nav.replaceChildren(navFragment);
+    setupActiveCategory(nav, categorias);
   } catch (err) {
     console.error('❌ Error cargando menú:', err);
     menu.innerHTML = '<p>Error cargando el menú. Revisa la consola.</p>';

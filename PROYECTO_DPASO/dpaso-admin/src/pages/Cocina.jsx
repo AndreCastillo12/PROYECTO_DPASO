@@ -11,6 +11,7 @@ const STATUS_LABEL = {
   preparing: "En preparación",
   ready: "Listo",
 };
+const BUSINESS_TIMEZONE = "America/Lima";
 
 function statusBadge(status) {
   if (status === "ready") return { background: "#dcfce7", color: "#166534" };
@@ -40,16 +41,19 @@ function toDateInputValue(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function buildDayRange(dateInput) {
-  const [year, month, day] = String(dateInput || "").split("-").map(Number);
-  if (!year || !month || !day) return null;
+function toBusinessDateInput(value) {
+  if (!value) return "";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "";
 
-  const start = new Date(year, month - 1, day, 0, 0, 0, 0);
-  const end = new Date(year, month - 1, day, 23, 59, 59, 999);
-  return {
-    startIso: start.toISOString(),
-    endIso: end.toISOString(),
-  };
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BUSINESS_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  return formatter.format(dt);
 }
 
 export default function Cocina() {
@@ -62,27 +66,30 @@ export default function Cocina() {
   const [selectedDate, setSelectedDate] = useState(() => toDateInputValue(new Date()));
 
   const loadData = async () => {
-    const dayRange = buildDayRange(selectedDate);
     setLoading(true);
     const { error: syncError } = await supabase.rpc("rpc_sync_web_orders_to_kitchen");
     if (syncError) {
       showToast(errMsg(syncError, "No se pudo sincronizar comandas web"), "warning");
     }
 
-    let commandQuery = supabase
+    const cmdResp = await supabase
       .from("kitchen_commands")
       .select("id,ticket_id,order_id,table_id,table_name_snapshot,ticket_code_snapshot,note,status,source_type,created_at")
       .order("created_at", { ascending: false })
       .in("status", ["pending", "preparing", "ready"]);
 
-    if (dayRange) {
-      commandQuery = commandQuery.gte("created_at", dayRange.startIso).lte("created_at", dayRange.endIso);
+    if (cmdResp.error) {
+      showToast(errMsg(cmdResp.error, "Error cargando comandas"), "error");
+      setCommands([]);
+      setCommandItems([]);
+      setLoading(false);
+      return;
     }
 
-    const cmdResp = await commandQuery;
+    const filteredCommands = (cmdResp.data || []).filter((command) => toBusinessDateInput(command.created_at) === selectedDate);
+    const commandIds = filteredCommands.map((command) => command.id);
 
     let itemsResp = { data: [], error: null };
-    const commandIds = (cmdResp.data || []).map((command) => command.id);
     if (commandIds.length > 0) {
       itemsResp = await supabase
         .from("kitchen_command_items")
@@ -91,10 +98,9 @@ export default function Cocina() {
         .order("created_at", { ascending: true });
     }
 
-    if (cmdResp.error) showToast(errMsg(cmdResp.error, "Error cargando comandas"), "error");
     if (itemsResp.error) showToast(errMsg(itemsResp.error, "Error cargando items de comanda"), "error");
 
-    setCommands(cmdResp.data || []);
+    setCommands(filteredCommands);
     setCommandItems(itemsResp.data || []);
     setLoading(false);
   };
@@ -102,8 +108,6 @@ export default function Cocina() {
   useEffect(() => {
     loadData();
   }, [selectedDate]);
-
-
 
   const groupedCommands = useMemo(() => {
     const map = new Map();
@@ -125,6 +129,7 @@ export default function Cocina() {
         return bTime - aTime;
       });
   }, [commands]);
+
   const itemsByCommand = useMemo(() => {
     const map = new Map();
     commandItems.forEach((item) => {

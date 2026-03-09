@@ -143,6 +143,13 @@ img {
   background: rgba(255, 255, 255, 0.2);
 }
 
+.nav a.active {
+  background: #ffffff;
+  color: var(--color-secondary);
+  border-color: #ffffff;
+}
+
+
 /* ===============================
    MENU GRID
 ================================ */
