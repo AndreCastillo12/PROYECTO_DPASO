@@ -58,13 +58,19 @@ begin
   ), pending_items as (
     select
       ti.id,
-      greatest(0, ti.qty - coalesce(sbi.qty_sent, 0))::integer as pending_qty
+      greatest(0, ti.qty - coalesce(sbi.qty_sent, 0))::integer as pending_qty,
+      not (
+        lower(coalesce(c.nombre, '')) like any (array['%bebida%','%drink%','%trago%'])
+        or lower(coalesce(ti.name_snapshot, '')) like any (array['%bebida%','%gaseosa%','%jugo%','%agua%','%cerveza%'])
+      ) as kitchen_required
     from public.table_ticket_items ti
     left join sent_by_item sbi on sbi.ticket_item_id = ti.id
+    left join public.platos p on p.id = ti.plato_id
+    left join public.categorias c on c.id = p.categoria_id
     where ti.ticket_id = v_ticket.id
       and ti.status = 'active'
   )
-  select coalesce(sum(pi.pending_qty), 0)::integer
+  select coalesce(sum(case when pi.kitchen_required then pi.pending_qty else 0 end), 0)::integer
   into v_pending_qty
   from pending_items pi;
 
@@ -115,12 +121,22 @@ begin
     ti.id,
     ti.plato_id,
     greatest(0, ti.qty - coalesce(sbi.qty_sent, 0))::integer,
-    ti.name_snapshot
+    case
+      when nullif(trim(coalesce(ti.notes, '')), '') is not null
+        then coalesce(ti.name_snapshot, 'Producto') || ' (Obs: ' || trim(ti.notes) || ')'
+      else coalesce(ti.name_snapshot, 'Producto')
+    end
   from public.table_ticket_items ti
   left join sent_by_item sbi on sbi.ticket_item_id = ti.id
+  left join public.platos p on p.id = ti.plato_id
+  left join public.categorias c on c.id = p.categoria_id
   where ti.ticket_id = v_ticket.id
     and ti.status = 'active'
-    and greatest(0, ti.qty - coalesce(sbi.qty_sent, 0)) > 0;
+    and greatest(0, ti.qty - coalesce(sbi.qty_sent, 0)) > 0
+    and not (
+      lower(coalesce(c.nombre, '')) like any (array['%bebida%','%drink%','%trago%'])
+      or lower(coalesce(ti.name_snapshot, '')) like any (array['%bebida%','%gaseosa%','%jugo%','%agua%','%cerveza%'])
+    );
 
   update public.table_tickets tt
   set status = 'sent_to_kitchen',
@@ -204,13 +220,20 @@ begin
       and kci.ticket_item_id is not null
     group by kci.ticket_item_id
   ), pending_items as (
-    select greatest(0, ti.qty - coalesce(sbi.qty_sent, 0))::integer as pending_qty
+    select
+      greatest(0, ti.qty - coalesce(sbi.qty_sent, 0))::integer as pending_qty,
+      not (
+        lower(coalesce(c.nombre, '')) like any (array['%bebida%','%drink%','%trago%'])
+        or lower(coalesce(ti.name_snapshot, '')) like any (array['%bebida%','%gaseosa%','%jugo%','%agua%','%cerveza%'])
+      ) as kitchen_required
     from public.table_ticket_items ti
     left join sent_by_item sbi on sbi.ticket_item_id = ti.id
+    left join public.platos p on p.id = ti.plato_id
+    left join public.categorias c on c.id = p.categoria_id
     where ti.ticket_id = v_ticket.id
       and ti.status = 'active'
   )
-  select coalesce(sum(pi.pending_qty), 0)::integer
+  select coalesce(sum(case when pi.kitchen_required then pi.pending_qty else 0 end), 0)::integer
   into v_unsent_qty
   from pending_items pi;
 
