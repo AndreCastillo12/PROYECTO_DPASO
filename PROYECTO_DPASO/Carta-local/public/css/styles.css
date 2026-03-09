@@ -1,0 +1,337 @@
+:root {
+  --color-background: #fff;
+  --color-text: #1a1a1a;
+  --color-primary: #0b2d4d;
+  --color-secondary: #1f4e79;
+  --color-accent: #178d42;
+  --color-muted: #555;
+  --color-white: #fff;
+
+  --radius-circle: 50%;
+  --radius-card: 14px;
+  --radius-image: 10px;
+
+  --shadow-card: 0 4px 10px rgba(0, 0, 0, 0.06);
+
+  --transition-base: 0.3s;
+  --transition-fade: 0.6s;
+  --transition-image: 0.4s ease;
+}
+
+/* ===============================
+   BASE
+================================ */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Arial, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-text);
+  overflow-x: hidden;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+.logo {
+  width: 60px;
+  border-radius: var(--radius-circle);
+}
+
+/* ===============================
+   LOADER
+================================ */
+#loader {
+  position: fixed;
+  inset: 0;
+  background: var(--color-primary);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+  transition: opacity var(--transition-fade) ease, visibility var(--transition-fade) ease;
+}
+
+#loader img {
+  width: 120px;
+  border-radius: var(--radius-circle);
+  animation: spinLogo 1.5s ease-in-out forwards;
+}
+
+#loader.hide {
+  opacity: 0;
+  visibility: hidden;
+}
+
+@keyframes spinLogo {
+  0% {
+    transform: rotate(0deg) scale(1);
+    opacity: 1;
+  }
+
+  80% {
+    transform: rotate(360deg) scale(1.05);
+  }
+
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+/* ===============================
+   HEADER
+================================ */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 20px;
+  background: var(--color-primary);
+  color: var(--color-white);
+}
+
+.header-text h1 {
+  font-size: 1.6rem;
+  letter-spacing: 1px;
+}
+
+.header-text p {
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+/* ===============================
+   NAV
+================================ */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--color-secondary);
+  display: flex;
+  justify-content: space-around;
+  padding: 12px 5px;
+}
+
+.nav a {
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: bold;
+  color: var(--color-white);
+}
+
+.nav a:hover {
+  text-decoration: underline;
+}
+
+/* ===============================
+   MENU GRID
+================================ */
+.menu {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  max-width: 1600px;
+  margin: auto;
+}
+
+.section-title {
+  grid-column: 1 / -1;
+  margin: 30px 0 10px;
+  border-left: 6px solid var(--color-secondary);
+  padding-left: 12px;
+  color: var(--color-primary);
+}
+
+/* ===============================
+   CARD
+================================ */
+.plato {
+  background: var(--color-white);
+  border-radius: var(--radius-card);
+  padding: 12px;
+  text-align: center;
+  transition: transform var(--transition-base);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.plato img {
+  width: 100%;
+  height: 220px;
+  object-fit: cover;
+  border-radius: var(--radius-image);
+  transition: transform var(--transition-image);
+}
+
+.plato:hover img {
+  transform: scale(1.08);
+}
+
+.plato:active img {
+  transform: scale(1.1);
+}
+
+.plato h3 {
+  margin: 10px 0 5px;
+  font-size: 1rem;
+  color: var(--color-primary);
+}
+
+.plato p {
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+.plato span {
+  display: block;
+  margin-top: 6px;
+  font-weight: bold;
+  color: var(--color-secondary);
+}
+
+/* ===============================
+   FOOTER
+================================ */
+footer {
+  background: var(--color-primary);
+  color: var(--color-white);
+  padding: 20px;
+  text-align: center;
+}
+
+.socials img {
+  width: 26px;
+  filter: invert(1);
+  margin: 15px 8px;
+}
+
+/* ===============================
+   ANIMACIONES
+================================ */
+.fade-up {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: var(--transition-fade);
+}
+
+.fade-up.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ===============================
+   RESPONSIVE GRID
+================================ */
+@media (min-width: 1400px) {
+  .menu {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+@media (max-width: 1399px) {
+  .menu {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 1023px) {
+  .header {
+    flex-wrap: wrap;
+  }
+
+  .header-text {
+    min-width: 0;
+  }
+
+  .header-text h1,
+  .header-text p {
+    overflow-wrap: anywhere;
+  }
+
+  .nav {
+    flex-wrap: wrap;
+    gap: 8px 10px;
+  }
+
+  .nav a {
+    white-space: nowrap;
+  }
+
+  .menu {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .menu {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .header {
+    gap: 10px;
+    padding: 16px;
+  }
+
+  .header-text h1 {
+    font-size: 1.3rem;
+  }
+
+  .header-text p {
+    font-size: 0.8rem;
+  }
+
+  .nav {
+    justify-content: center;
+  }
+
+  .menu {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 16px;
+  }
+
+  .plato img {
+    height: 200px;
+  }
+}
+
+/* ===============================
+   WHATSAPP FLOAT
+================================ */
+.whatsapp-float {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 55px;
+  height: 55px;
+  background: var(--color-accent);
+  border-radius: 60%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 50;
+  transition: transform var(--transition-base);
+}
+
+.whatsapp-float img {
+  width: 28px;
+  height: 28px;
+}
+
+.whatsapp-float:hover {
+  transform: scale(1.1);
+}
