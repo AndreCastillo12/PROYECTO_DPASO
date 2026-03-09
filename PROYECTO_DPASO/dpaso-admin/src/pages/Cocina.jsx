@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { getUserErrorMessage } from "../lib/userError";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import useAdminRole from "../hooks/useAdminRole";
@@ -29,8 +30,7 @@ function fmtHour(value) {
 }
 
 function errMsg(error, fallback) {
-  const msg = String(error?.message || "").trim();
-  return msg ? `${fallback}: ${msg}` : fallback;
+  return getUserErrorMessage(error, fallback);
 }
 
 export default function Cocina() {

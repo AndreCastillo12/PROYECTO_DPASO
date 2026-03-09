@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { getUserErrorMessage } from "../lib/userError";
 import Toast from "../components/Toast";
 import useToast from "../hooks/useToast";
 import useAdminRole from "../hooks/useAdminRole";
@@ -9,8 +10,7 @@ function money(v) {
 }
 
 function errMsg(error, fallback) {
-  const msg = String(error?.message || "").trim();
-  return msg ? `${fallback}: ${msg}` : fallback;
+  return getUserErrorMessage(error, fallback);
 }
 
 async function loadPlatosCompatible() {
@@ -79,6 +79,7 @@ export default function Salon() {
   const [cashReceived, setCashReceived] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
   const [hasOpenCashSession, setHasOpenCashSession] = useState(false);
+  const [kitchenCommandStats, setKitchenCommandStats] = useState({ inProgress: 0, sentQtyByItem: new Map() });
 
   async function refreshAll() {
     setLoading(true);
@@ -127,7 +128,46 @@ export default function Salon() {
       return;
     }
 
-    setItems(data || []);
+    const nextItems = data || [];
+    setItems(nextItems);
+
+    const { data: commandsData, error: commandsError } = await supabase
+      .from("kitchen_commands")
+      .select("id,status")
+      .eq("ticket_id", ticketId)
+      .eq("source_type", "salon");
+
+    if (commandsError) {
+      showToast(errMsg(commandsError, "Error cargando estado de comandas"), "warning");
+      setKitchenCommandStats({ inProgress: 0, sentQtyByItem: new Map() });
+      return;
+    }
+
+    const commandIds = (commandsData || []).map((command) => command.id);
+    const inProgress = (commandsData || []).filter((command) => ["pending", "preparing"].includes(command.status)).length;
+    if (!commandIds.length) {
+      setKitchenCommandStats({ inProgress, sentQtyByItem: new Map() });
+      return;
+    }
+
+    const { data: commandItemsData, error: commandItemsError } = await supabase
+      .from("kitchen_command_items")
+      .select("ticket_item_id,qty")
+      .in("command_id", commandIds);
+
+    if (commandItemsError) {
+      showToast(errMsg(commandItemsError, "Error cargando estado de envío a cocina"), "warning");
+      setKitchenCommandStats({ inProgress, sentQtyByItem: new Map() });
+      return;
+    }
+
+    const sentQtyByItem = new Map();
+    (commandItemsData || []).forEach((row) => {
+      if (!row.ticket_item_id) return;
+      const prev = Number(sentQtyByItem.get(row.ticket_item_id) || 0);
+      sentQtyByItem.set(row.ticket_item_id, prev + Number(row.qty || 0));
+    });
+    setKitchenCommandStats({ inProgress, sentQtyByItem });
   }
 
   useEffect(() => {
@@ -163,6 +203,19 @@ export default function Salon() {
   }, [activeTables, openTicketByTable]);
 
   const total = useMemo(() => items.reduce((acc, it) => acc + (Number(it.qty || 0) * Number(it.price_snapshot || 0)), 0), [items]);
+  const pendingToSendQty = useMemo(
+    () => items.reduce((acc, item) => {
+      const sent = Number(kitchenCommandStats.sentQtyByItem.get(item.id) || 0);
+      const pending = Math.max(0, Number(item.qty || 0) - sent);
+      return acc + pending;
+    }, 0),
+    [items, kitchenCommandStats],
+  );
+  const canMoveToClosing = pendingToSendQty === 0 && kitchenCommandStats.inProgress === 0;
+  const totalNumber = Number(total || 0);
+  const cashReceivedNumber = Number(cashReceived || 0);
+  const cashChange = paymentMethod === "cash" ? Math.max(0, cashReceivedNumber - totalNumber) : 0;
+  const isCashInsufficient = paymentMethod === "cash" && cashReceivedNumber < totalNumber;
 
   const filteredPlatos = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -263,6 +316,10 @@ export default function Salon() {
 
   async function setTicketStatus(nextStatus) {
     if (!selectedTicket?.id) return;
+    if (nextStatus === "closing" && !canMoveToClosing) {
+      showToast("No puedes pasar a cobro: aún hay platos por enviar o en preparación en cocina.", "warning");
+      return;
+    }
     setBusy(true);
     const { data, error } = await supabase
       .from("table_tickets")
@@ -310,6 +367,10 @@ export default function Salon() {
   async function sendTicketToKitchen() {
     if (!selectedTicket?.id) {
       showToast("Selecciona un ticket", "warning");
+      return;
+    }
+    if (pendingToSendQty <= 0) {
+      showToast("No hay platos nuevos pendientes por enviar a cocina.", "warning");
       return;
     }
     setBusy(true);
@@ -368,8 +429,18 @@ export default function Salon() {
       return;
     }
 
+    if (!canMoveToClosing) {
+      showToast("No puedes cobrar este ticket porque aún hay platos pendientes en cocina o por enviar.", "warning");
+      return;
+    }
+
     if (paymentMethod === "cash" && !hasOpenCashSession) {
       showToast("Para pago en efectivo debes abrir caja", "error");
+      return;
+    }
+
+    if (isCashInsufficient) {
+      showToast("El monto recibido no es suficiente para completar el cobro.", "warning");
       return;
     }
 
@@ -455,10 +526,13 @@ export default function Salon() {
         {!selectedTicket || selectedTicket.status === "closed" ? <p>Selecciona mesa y abre ticket.</p> : (
           <>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-              <button type="button" style={btnGhost} disabled={busy || !canAccess("salon")} onClick={sendTicketToKitchen}>Enviar cocina</button>
-              <button type="button" style={btnGhost} disabled={busy || !["open", "sent_to_kitchen", "ready"].includes(selectedTicket?.status)} onClick={() => setTicketStatus("closing")}>En cobro</button>
+              <button type="button" style={btnGhost} disabled={busy || !canAccess("salon") || pendingToSendQty <= 0} onClick={sendTicketToKitchen}>Enviar cocina</button>
+              <button type="button" style={btnGhost} disabled={busy || !["open", "sent_to_kitchen", "ready"].includes(selectedTicket?.status) || !canMoveToClosing} onClick={() => setTicketStatus("closing")}>En cobro</button>
               <button type="button" style={btnGhost} disabled={!items.length} onClick={() => printPrecuenta({ tableName: selectedTable?.table_name || "Mesa", ticketId: selectedTicket.id, items, total })}>Precuenta</button>
             </div>
+            <small style={{ color: "#6b7280" }}>
+              Pendientes por enviar: {pendingToSendQty} · Comandas en cocina: {kitchenCommandStats.inProgress}
+            </small>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
               <div>
@@ -512,12 +586,18 @@ export default function Salon() {
                     <option value="other">Otro</option>
                   </select>
                   {paymentMethod === "cash" ? (
-                    <input style={inputStyle} type="number" min="0" step="0.01" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} placeholder="Paga con" />
+                    <>
+                      <input style={inputStyle} type="number" min="0" step="0.01" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} placeholder="Monto recibido" />
+                      <small style={{ color: "#374151" }}>
+                        Total: {money(totalNumber)} · Recibido: {money(cashReceivedNumber)} · Vuelto: {money(cashChange)}
+                      </small>
+                      {isCashInsufficient ? <small style={{ color: "#b3261e" }}>El monto recibido no es suficiente para completar el cobro.</small> : null}
+                    </>
                   ) : (
                     <input style={inputStyle} type="text" value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} placeholder="Referencia" />
                   )}
                   {!hasOpenCashSession && paymentMethod !== "cash" ? <small style={{ color: "#a16207" }}>Aviso: caja cerrada. Pago no-efectivo permitido.</small> : null}
-                  <button type="button" style={btnDanger} disabled={busy || selectedTicket?.status !== "closing"} onClick={finalizeTicketPayment}>Cerrar ticket / Cobrar</button>
+                  <button type="button" style={btnDanger} disabled={busy || selectedTicket?.status !== "closing" || !canMoveToClosing || isCashInsufficient} onClick={finalizeTicketPayment}>Cerrar ticket / Cobrar</button>
                 </div>
               </div>
             </div>
