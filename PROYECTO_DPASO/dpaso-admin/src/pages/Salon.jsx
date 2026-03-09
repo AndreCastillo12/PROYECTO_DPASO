@@ -347,16 +347,14 @@ export default function Salon() {
     }
     setBusy(true);
     const { data, error } = await supabase
-      .from("table_tickets")
-      .update({ status: nextStatus, updated_at: new Date().toISOString() })
-      .eq("id", selectedTicket.id)
-      .select("id,table_id,status,payment_status,opened_at,generated_order_id")
-      .single();
+      .rpc("rpc_salon_set_ticket_status", { p_ticket_id: selectedTicket.id, p_next_status: nextStatus });
+
     if (error) {
       showToast(errMsg(error, "No se pudo actualizar estado"), "error");
       setBusy(false);
       return;
     }
+
     setTickets((prev) => prev.map((t) => (t.id === data.id ? data : t)));
     setSelectedTicket(data);
     setBusy(false);
