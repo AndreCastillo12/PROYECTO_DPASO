@@ -1,6 +1,12 @@
 -- Sprint 50: comandas parciales para salón + bloqueo de cobro por cocina pendiente
 
 -- Permite múltiples envíos a cocina por ticket, enviando solo cantidades pendientes.
+-- Quita restricción legacy que impedía múltiples comandas por ticket salón.
+drop index if exists public.kitchen_commands_salon_ticket_uidx;
+create index if not exists kitchen_commands_salon_ticket_idx
+  on public.kitchen_commands(ticket_id, created_at desc)
+  where source_type = 'salon';
+
 drop function if exists public.rpc_salon_send_to_kitchen(uuid, text);
 create or replace function public.rpc_salon_send_to_kitchen(
   p_ticket_id uuid,

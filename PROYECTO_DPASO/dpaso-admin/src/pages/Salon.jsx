@@ -215,7 +215,9 @@ export default function Salon() {
   const totalNumber = Number(total || 0);
   const cashReceivedNumber = Number(cashReceived || 0);
   const cashChange = paymentMethod === "cash" ? Math.max(0, cashReceivedNumber - totalNumber) : 0;
+  const hasCashInput = String(cashReceived || "").trim() !== "";
   const isCashInsufficient = paymentMethod === "cash" && cashReceivedNumber < totalNumber;
+  const shouldShowCashInsufficient = paymentMethod === "cash" && hasCashInput && isCashInsufficient;
 
   const filteredPlatos = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -370,7 +372,6 @@ export default function Salon() {
       return;
     }
     if (pendingToSendQty <= 0) {
-      showToast("No hay platos nuevos pendientes por enviar a cocina.", "warning");
       return;
     }
     setBusy(true);
@@ -591,7 +592,7 @@ export default function Salon() {
                       <small style={{ color: "#374151" }}>
                         Total: {money(totalNumber)} · Recibido: {money(cashReceivedNumber)} · Vuelto: {money(cashChange)}
                       </small>
-                      {isCashInsufficient ? <small style={{ color: "#b3261e" }}>El monto recibido no es suficiente para completar el cobro.</small> : null}
+                      {shouldShowCashInsufficient ? <small style={{ color: "#b3261e" }}>El monto recibido no es suficiente para completar el cobro.</small> : null}
                     </>
                   ) : (
                     <input style={inputStyle} type="text" value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} placeholder="Referencia" />
